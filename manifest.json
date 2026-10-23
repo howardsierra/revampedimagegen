@@ -1,0 +1,12 @@
+{
+    "display_name": "Revamped Image Gen",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "howardsierra (based on notsosillynotsoimages by aceeenvw)",
+    "version": "1.0.0",
+    "homePage": "https://github.com/howardsierra/revampedimagegen",
+    "auto_update": true
+}

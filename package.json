@@ -1,0 +1,12 @@
+{
+  "name": "revamped-image-gen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Inline image & video generation for SillyTavern with a mobile-first studio panel.",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "eslint index.js src"
+  }
+}

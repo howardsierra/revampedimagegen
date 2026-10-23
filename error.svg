@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="384" viewBox="0 0 512 384" role="img" aria-label="Image generation failed">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a2230"/>
+      <stop offset="1" stop-color="#241826"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="384" rx="24" fill="url(#g)"/>
+  <rect x="8" y="8" width="496" height="368" rx="18" fill="none" stroke="#e06c75" stroke-opacity=".45" stroke-width="2" stroke-dasharray="10 8"/>
+  <g transform="translate(256 150)" fill="none" stroke="#e8a0a7" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-62 40 L0 -58 L62 40 Z"/>
+    <path d="M0 -16 V10"/>
+    <circle cx="0" cy="26" r="1.5"/>
+  </g>
+  <text x="256" y="262" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="26" font-weight="600" fill="#f2d0d4">Generation failed</text>
+  <text x="256" y="300" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="18" fill="#d7a9af">Tap to retry or edit the prompt</text>
+</svg>

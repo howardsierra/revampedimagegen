@@ -1,0 +1,122 @@
+/*
+ * Revamped Image Gen — generation pipeline: resolve options → collect refs →
+ * call provider with retry → persist on the ST server.
+ * Licensed under AGPL-3.0-or-later.
+ */
+
+import { ASPECT_RATIOS, IMAGE_SIZES, VIDEO_RESOLUTIONS } from './constants.js';
+import { withRetry } from './net.js';
+import { generateVideo, getProvider } from './providers.js';
+import { collectRefs } from './refs.js';
+import { settings } from './settings.js';
+import { log } from './st.js';
+import { persistResult } from './storage.js';
+
+/**
+ * Merge instruction data (from a tag or the studio form) with user defaults.
+ * Aspect ratio always follows the instruction when valid: it is a composition
+ * choice. Other fields follow the instruction only when `tagOverrides` is on
+ * (or the request came from the studio, where the user typed them).
+ */
+export function resolveOptions(kind, data, { fromStudio = false } = {}) {
+    const s = settings();
+    const tagWins = fromStudio || s.tagOverrides;
+    const pick = (tagVal, def) => (tagWins ? (tagVal || def) : (def || tagVal));
+    const ar = ASPECT_RATIOS.includes(data.aspect_ratio) ? data.aspect_ratio : (kind === 'video' ? '16:9' : s.aspectRatio);
+    let imageSize = pick(String(data.image_size || '').toUpperCase(), s.imageSize);
+    if (!IMAGE_SIZES.includes(imageSize)) imageSize = '1K';
+    const raw = String(data.prompt || '').trim();
+    const prompt = fromStudio ? raw : [s.promptPrefix, raw, s.promptSuffix].map(x => String(x || '').trim()).filter(Boolean).join(' ');
+    return {
+        kind,
+        rawPrompt: raw,
+        prompt,
+        style: pick(data.style, s.defaultStyle) || '',
+        aspectRatio: ar,
+        imageSize,
+        quality: pick(data.quality, s.quality),
+        preset: data.preset || '',
+        negative: data.negative_prompt || s.negativePrompt || '',
+        seed: Number.isFinite(Number(data.seed)) && data.seed !== '' && data.seed != null ? Number(data.seed) : null,
+        duration: data.duration,
+        resolution: VIDEO_RESOLUTIONS.includes(data.resolution) ? data.resolution : undefined,
+        audio: typeof data.audio === 'boolean' ? data.audio : undefined,
+        refMode: data.ref_mode,
+        noRefs: !!data.no_refs,
+    };
+}
+
+/** Throw a friendly, non-retriable error if the connection is obviously incomplete. */
+export function validateConnection(kind = 'image') {
+    const s = settings();
+    const p = getProvider(s.provider);
+    const fail = (msg) => { throw Object.assign(new Error(msg), { noRetry: true, config: true }); };
+    if (!s.endpoint && !p.defaultEndpoint) fail('Set an endpoint URL in Settings → Connection.');
+    if (p.keyRequired && !s.apiKey) fail(`${p.label} needs an API key (Settings → Connection).`);
+    if (p.supportsModels && p.keyRequired && !s.model && kind === 'image') fail('Pick a model in Settings → Connection.');
+    if (kind === 'video' && !s.videoModel) fail('Set a video model in Settings → Video.');
+}
+
+/**
+ * Generate one image/video and save it. Returns
+ * { path, persisted, options, refNames, provider, model, ms }.
+ */
+export async function generate(kind, data, { signal, setStatus = () => {}, fromStudio = false } = {}) {
+    validateConnection(kind);
+    const s = settings();
+    const provider = getProvider(s.provider);
+    const opts = resolveOptions(kind, data, { fromStudio });
+    if (!opts.rawPrompt) throw Object.assign(new Error('Empty prompt'), { noRetry: true });
+
+    let refs = [];
+    let refNames = [];
+    const canRef = kind === 'video' || (provider.supportsRefs && s.sendRefs);
+    if (canRef && !opts.noRefs) {
+        setStatus('Loading references…');
+        const r = await collectRefs(opts.rawPrompt);
+        refs = r.urls;
+        refNames = r.matched.map(m => m.name);
+    }
+
+    const req = { ...opts, refs, signal, timeoutMs: (Number(s.timeoutSec) || 300) * 1000 * (kind === 'video' ? 2 : 1) };
+    const t0 = Date.now();
+    setStatus(kind === 'video' ? 'Rendering video…' : 'Generating…');
+    log('info', `${provider.label}: ${kind} "${opts.prompt.slice(0, 60)}" ar=${opts.aspectRatio} size=${opts.imageSize} refs=${refs.length}`);
+
+    const result = await withRetry(
+        () => (kind === 'video' ? generateVideo(req, s) : provider.generate(req, s)),
+        {
+            retries: Number(s.maxRetries) || 0,
+            baseDelay: Number(s.retryDelay) || 1500,
+            signal,
+            onRetry: (n, wait, e) => setStatus(`${shortError(e)} — retry ${n} in ${Math.ceil(wait / 1000)}s`),
+        },
+    );
+
+    setStatus('Saving…');
+    const saved = await persistResult(result, { useCorsProxy: s.useCorsProxy, signal });
+    return { ...saved, options: opts, refNames, provider: provider.id, model: kind === 'video' ? s.videoModel : s.model, ms: Date.now() - t0 };
+}
+
+export function shortError(e) {
+    const m = String(e?.message || e || 'Error');
+    return m.length > 60 ? `${m.slice(0, 57)}…` : m;
+}
+
+/** Suggest a fix for common failures. Returns a sentence or ''. */
+export function hintFor(e) {
+    const s = settings();
+    const msg = String(e?.message || '').toLowerCase();
+    const status = e?.status;
+    if (status === 401 || status === 403 || /unauthor|invalid api key|permission/.test(msg)) return 'The provider rejected your key. Re-check the API key, and that this key can use the selected model.';
+    if (status === 404) return s.provider === 'openai'
+        ? 'Path not found. If your provider documents a prefix (like /v1 or /compatible), include it in the endpoint, or try the Gemini-compatible type.'
+        : 'Path not found. Check the endpoint URL and the model name.';
+    if (status === 413) return 'Request too large — try fewer reference images.';
+    if (status === 429) return 'Rate limited. Lower "Parallel jobs" in Settings → Behaviour.';
+    if (/cors|network error/.test(msg)) return 'The browser could not reach the provider. Enable "Route through ST CORS proxy" (needs enableCorsProxy: true in config.yaml).';
+    if (/safety|blocked/.test(msg)) return 'The provider\'s safety filter blocked this prompt. Rephrase it or use a different model.';
+    if (/text instead of an image/.test(msg)) return 'This model answered with text. Pick an image-capable model.';
+    if (/timed out/.test(msg)) return 'The provider took too long. Raise the timeout in Settings → Behaviour.';
+    return '';
+}

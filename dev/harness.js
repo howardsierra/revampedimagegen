@@ -61,7 +61,7 @@ function renderMessage(i) {
 window.SillyTavern = {
     getContext: () => ({
         chat, characters: [{ name: 'Elodie', avatar: 'elodie.png' }], characterId: 0, groupId: null, groups: [],
-        name1: 'Robin', name2: 'Elodie', chatMetadata: (window.__meta ||= {}), extensionSettings,
+        name1: 'Robin', name2: 'Elodie', chatMetadata: ((window.__metas ||= {})[chatId] ||= {}), extensionSettings,
         eventSource, event_types, eventTypes: event_types,
         getCurrentChatId: () => chatId,
         getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),

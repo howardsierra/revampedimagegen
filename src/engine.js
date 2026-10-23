@@ -70,15 +70,17 @@ export async function generate(kind, data, { signal, setStatus = () => {}, fromS
 
     let refs = [];
     let refNames = [];
+    let refLabels = [];
     const canRef = kind === 'video' || (provider.supportsRefs && s.sendRefs);
     if (canRef && !opts.noRefs) {
         setStatus('Loading references…');
-        const r = await collectRefs(opts.rawPrompt);
+        const r = await collectRefs(opts.rawPrompt, kind === 'video' ? { max: 4 } : undefined);
         refs = r.urls;
+        refLabels = r.labels;
         refNames = r.matched.map(m => m.name);
     }
 
-    const req = { ...opts, refs, signal, timeoutMs: (Number(s.timeoutSec) || 300) * 1000 * (kind === 'video' ? 2 : 1) };
+    const req = { ...opts, refs, refLabels, signal, timeoutMs: (Number(s.timeoutSec) || 300) * 1000 * (kind === 'video' ? 2 : 1) };
     const t0 = Date.now();
     setStatus(kind === 'video' ? 'Rendering video…' : 'Generating…');
     log('info', `${provider.label}: ${kind} "${opts.prompt.slice(0, 60)}" ar=${opts.aspectRatio} size=${opts.imageSize} refs=${refs.length}`);

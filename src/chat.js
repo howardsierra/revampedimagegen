@@ -14,6 +14,7 @@ import { describeScene } from './prompt.js';
 import * as queue from './queue.js';
 import { settings, save } from './settings.js';
 import { assetUrl, chatId, ctx, haptic, isAbort, log, toast } from './st.js';
+import { applyCapture } from './capture.js';
 import { buildTag, parseInstruction, parseTags, withData, withSrc } from './tags.js';
 import { h, icon, fmtElapsed } from './ui/dom.js';
 
@@ -317,12 +318,34 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
     return job;
 }
 
+/**
+ * Convert image requests written in other formats (capture rules) into tags,
+ * in the message source. Returns true if the message changed.
+ */
+export function captureMessage(mesId) {
+    const rules = settings().captureRules?.filter(r => r.enabled);
+    const msg = ctx().chat?.[mesId];
+    if (!rules?.length || !msg?.mes) return false;
+    const before = msg.mes;
+    const { text, captured, errors } = applyCapture(before, rules);
+    for (const e of errors) log('warn', `Capture rule "${e.rule}" is invalid: ${e.error}`);
+    if (!captured.length) return false;
+    msg.mes = text;
+    if (Array.isArray(msg.swipes) && Number.isInteger(msg.swipe_id) && msg.swipes[msg.swipe_id] === before) msg.swipes[msg.swipe_id] = text;
+    if (msg.extra?.display_text) msg.extra.display_text = applyCapture(msg.extra.display_text, rules).text;
+    log('info', `Message ${mesId}: captured ${captured.length} prompt(s) via ${[...new Set(captured.map(c => c.rule))].join(', ')}`);
+    ctx().saveChat();
+    rawRerender(mesId);
+    return true;
+}
+
 /** Generate every pending tag in a message. Called after each AI message renders. */
 export function processMessage(mesId, { force = false } = {}) {
     const s = settings();
     if (!s.enabled) return [];
     const msg = ctx().chat?.[mesId];
     if (!msg || msg.is_system) return [];
+    if (!msg.is_user) captureMessage(mesId);
     const pending = parseTags(msg.mes).filter(t => t.state === 'pending');
     reattach(mesId);
     if (!pending.length || (!s.autoGenerate && !force)) {

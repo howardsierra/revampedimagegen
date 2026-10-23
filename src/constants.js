@@ -36,14 +36,10 @@ export const DEFAULT_STYLES = Object.freeze([
 ]);
 
 export const DEFAULT_INJECT_TEMPLATE = `[Image generation is available.]
-When a moment in the scene is worth showing, embed an image tag in your reply, at most {{iig_max}} per reply:
-<img data-iig-instruction='{"style":"STYLE","prompt":"PROMPT","aspect_ratio":"RATIO","image_size":"1K"}' src="[IMG:GEN]">
-Rules:
-- Wrap the attribute in SINGLE quotes and use DOUBLE quotes inside the JSON.
-- PROMPT: a detailed English description (60+ words) of subject, pose, setting, lighting, mood and camera framing.
-- Always refer to characters by FIRST NAME inside PROMPT so reference photos can be matched. Known characters with references: {{iig_names}}.
-- RATIO: one of 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9 — pick what suits the composition.
-- Every new image must use src="[IMG:GEN]". Never copy src paths from earlier messages.`;
+When a moment in the scene is worth showing, request an image in your reply, at most {{iig_max}} per reply.
+{{iig_format}}
+- PROMPT: a detailed English description (60+ words) of subject, pose, expression, setting, lighting, mood and camera framing.
+- Always refer to characters by FIRST NAME inside PROMPT so reference photos can be matched. Known characters with references: {{iig_names}}.`;
 
 export const SCENE_PROMPT_TEMPLATE = `[Pause the roleplay. Write ONE image-generation prompt that illustrates the scene below. Output only the prompt — no preamble, no quotes, no markdown.
 Requirements: English, 60–120 words; describe subject, appearance, pose, expression, setting, lighting, mood and camera framing; refer to characters by their first name ({{iig_names}}).]

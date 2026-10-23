@@ -142,9 +142,21 @@ export function toggle(label, checked, onChange, hint) {
     );
 }
 
-/** Labelled field wrapper. */
+let fieldSeq = 0;
+
+/**
+ * Labelled field wrapper. Single form controls are linked with for/id; groups
+ * (chip rows, button sets) get a plain container — wrapping those in <label>
+ * would make taps on the label or hint "click" the first button.
+ */
 export function field(label, control, hint) {
-    return h('label.iig-field', {}, h('span.iig-field-label', {}, label), control, hint ? h('small.iig-hint', {}, hint) : null);
+    const single = control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement;
+    if (single && !control.id) control.id = `iig-f${++fieldSeq}`;
+    const lab = single
+        ? h('label.iig-field-label', { for: control.id }, label)
+        : h('span.iig-field-label', { role: 'heading', 'aria-level': '4' }, label);
+    return h('div.iig-field', { role: single ? null : 'group', 'aria-label': single ? null : label },
+        lab, control, hint ? h('small.iig-hint', {}, hint) : null);
 }
 
 /** Collapsible section (native <details>, keyboard + screen-reader friendly). */

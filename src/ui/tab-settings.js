@@ -3,11 +3,13 @@
  */
 
 import { ASPECT_RATIOS, DEFAULT_INJECT_TEMPLATE, DEFAULT_STYLES, DISPLAY_NAME, IMAGE_SIZES, VERSION, VIDEO_RESOLUTIONS } from '../constants.js';
+import { applyCapture, compileRule } from '../capture.js';
+import { RECIPES, modelCaps } from '../models.js';
 import { PROVIDERS, getProvider, normalizeNaisteraModel } from '../providers.js';
 import { renderInjection, updateInjection } from '../prompt.js';
 import { clearRefCache } from '../refs.js';
 import { applyProfile, importLegacy, legacySettings, save, settings, snapshotProfile, updateActiveProfile } from '../settings.js';
-import { logsAsText, onLog, toast } from '../st.js';
+import { logsAsText, onLog, toast, uid } from '../st.js';
 import { chipSelect, copyText, debounce, field, h, icon, section, toggle } from './dom.js';
 import { confirmDialog } from './editor.js';
 import { ratioChip } from './widgets.js';
@@ -99,7 +101,26 @@ export function createSettingsTab() {
         }, icon('eye'));
 
         const modelList = h('datalist', { id: 'iig-model-list' });
-        const model = text('model', { placeholder: provider.supportsModels ? 'Type or fetch…' : '', list: 'iig-model-list' });
+        const capsLine = h('div.iig-caps');
+        const paintCaps = () => {
+            const m = settings().model;
+            const c = modelCaps(m);
+            capsLine.hidden = !m;
+            if (!m) return;
+            const bits = [c.label || 'Unknown model', `sizes ${c.sizes.join('/')}`];
+            if (c.hardRefs) bits.push(`refs: ${c.maxRefs} by default, up to ${c.hardRefs}`);
+            else bits.push('no reference images');
+            capsLine.replaceChildren(h('strong', {}, bits[0]), h('span', {}, bits.slice(1).join(' · ')), c.note ? h('small', {}, c.note) : null);
+        };
+        const model = text('model', { placeholder: provider.supportsModels ? 'Type or fetch…' : '', list: 'iig-model-list', onAfter: () => { paintCaps(); markRec(); } });
+        const recipe = RECIPES.find(r => r.provider === provider.id && r.models.length);
+        const recChips = h('div.iig-chips', {}, (recipe?.models || []).map(m => h('button.iig-chip', {
+            type: 'button', dataset: { model: m }, title: modelCaps(m).note,
+            onclick: () => { model.value = m; settings().model = m; save('model'); paintCaps(); markRec(); },
+        }, modelCaps(m).label, h('small.iig-chip-sub', {}, m))));
+        const markRec = () => { for (const b of recChips.children) b.classList.toggle('active', b.dataset.model === settings().model); };
+        paintCaps();
+        markRec();
         const modelPick = h('div.iig-model-pick', { hidden: true });
         const fetchBtn = h('button.iig-btn.small', {
             type: 'button', onclick: async () => {
@@ -107,7 +128,7 @@ export function createSettingsTab() {
                 fetchBtn.classList.add('is-busy');
                 try {
                     const list = await getProvider(settings().provider).listModels(settings());
-                    const imageish = list.filter(m => /image|dall-e|flux|imagen|banana|sdxl|stable|diffusion|seedream|ideogram|recraft|kolors|hidream|midjourney|qwen|grok|gpt-5|veo|sora|kling|wan|seedance/i.test(m));
+                    const imageish = list.filter(m => /banana|gpt-image|image|dall-e|flux|imagen|banana|sdxl|stable|diffusion|seedream|ideogram|recraft|kolors|hidream|midjourney|qwen|grok|gpt-5|veo|sora|kling|wan|seedance/i.test(m));
                     const shown = (imageish.length ? imageish : list).slice(0, 300);
                     modelList.replaceChildren(...shown.map(m => h('option', { value: m })));
                     modelPick.hidden = !shown.length;
@@ -117,6 +138,8 @@ export function createSettingsTab() {
                             settings().model = m;
                             save('model');
                             for (const b of modelPick.children) b.classList.toggle('active', b.textContent === m);
+                            paintCaps();
+                            markRec();
                         },
                     }, m)));
                     toast.success(`Found ${list.length} model${list.length === 1 ? '' : 's'}${imageish.length && imageish.length !== list.length ? ` (${imageish.length} look image-capable)` : ''}`);
@@ -138,6 +161,13 @@ export function createSettingsTab() {
             providerExtras.push(field('Naistera model', nm), field('Preset (Grok only)', select('naisteraPreset', [{ value: '', label: 'None' }, { value: 'digital', label: 'Digital' }, { value: 'realism', label: 'Realism' }])));
         }
         if (provider.id === 'openai') {
+            providerExtras.push(
+                flag('openaiFidelity', 'High input fidelity', 'gpt-image-1 / 1.5: keep faces closer to reference photos (costs more input tokens)'),
+                h('div.iig-row-2', {},
+                    field('Moderation', select('openaiModeration', [{ value: 'auto', label: 'Auto' }, { value: 'low', label: 'Low (less strict)' }])),
+                    field('Output format', select('openaiFormat', [{ value: 'png', label: 'PNG' }, { value: 'webp', label: 'WebP (smaller)' }, { value: 'jpeg', label: 'JPEG (smallest)' }])),
+                ),
+            );
             providerExtras.push(field('Reference images via', select('openaiRefMode', [
                 { value: 'auto', label: 'Auto (multipart for api.openai.com, JSON elsewhere)' },
                 { value: 'json', label: 'JSON body.image (aggregators)' },
@@ -177,13 +207,32 @@ export function createSettingsTab() {
             },
         }, icon('plug'), h('span', {}, 'Test'));
 
+        const recipes = h('div.iig-recipes', {}, RECIPES.map(r => h(`button.iig-recipe${s.provider === r.provider && (!r.models.length || r.models.includes(s.model)) ? '.active' : ''}`, {
+            type: 'button',
+            onclick: () => {
+                const st = settings();
+                if (st.provider !== r.provider) st.apiKey = '';
+                st.provider = r.provider;
+                st.endpoint = r.endpoint;
+                st.pathOverride = '';
+                st.useCorsProxy = false;
+                if (r.models.length) st.model = r.models[0];
+                else if (st.provider !== r.provider) st.model = '';
+                save('provider');
+                render();
+                toast.info(r.keyHint, { timeOut: 6000 });
+                setTimeout(() => el.querySelector('input[type="password"]')?.focus(), 50);
+            },
+        }, icon(r.icon), h('span.iig-recipe-title', {}, r.title), h('small', {}, r.subtitle))));
+
         return section('Connection', [
+            field('Quick setup', recipes, 'Tuned presets for Nano Banana and GPT Image. Pick one, paste your key, done.'),
             field('Profile', h('div.iig-stack', {}, profileSel, profileRow), 'Save complete provider setups and switch with one tap.'),
             field('API type', providerSel, provider.hint),
             field('Endpoint URL', text('endpoint', { type: 'url', placeholder: provider.defaultEndpoint || 'https://…', inputmode: 'url' }), 'Base URL only. Include any documented prefix such as /v1 or /compatible.'),
             field('API key', h('div.iig-input-group', {}, key, eye), 'Stored in SillyTavern\'s settings.json and masked in logs.'),
             provider.supportsModels || provider.id !== 'naistera'
-                ? field('Model', h('div.iig-stack', {}, h('div.iig-input-group', {}, model, provider.supportsModels ? fetchBtn : null), modelPick, modelList))
+                ? field('Model', h('div.iig-stack', {}, recipe ? recChips : null, h('div.iig-input-group', {}, model, provider.supportsModels ? fetchBtn : null), capsLine, modelPick, modelList))
                 : null,
             ...providerExtras,
             provider.supportsRefs ? flag('sendRefs', 'Send reference images', 'Turn off for providers that reject image input') : null,
@@ -207,7 +256,7 @@ export function createSettingsTab() {
             field('Default style', text('defaultStyle', { placeholder: 'e.g. semi-realistic digital painting', list: 'iig-style-list' })),
             field('Aspect ratio (when the tag has none)', ar.el),
             field('Resolution', size.el),
-            field('Quality (OpenAI)', select('quality', ['auto', 'low', 'medium', 'high', 'standard', 'hd'])),
+            field('Quality (GPT Image)', select('quality', (modelCaps(s.model).qualities.length ? modelCaps(s.model).qualities : ['auto', 'low', 'medium', 'high']).map(q => ({ value: q, label: q })))),
             h('div.iig-row-2', {}, field('Prompt prefix', text('promptPrefix', { placeholder: 'Added before every chat prompt' })), field('Prompt suffix', text('promptSuffix', { placeholder: 'Added after' }))),
             field('Negative prompt', text('negativePrompt', { placeholder: 'Used where supported (SD WebUI, some aggregators)' })),
         ], { iconName: 'sliders' });
@@ -252,8 +301,88 @@ export function createSettingsTab() {
                 h('button.iig-btn.small.ghost', { type: 'button', onclick: () => { settings().injectTemplate = DEFAULT_INJECT_TEMPLATE; tpl.value = DEFAULT_INJECT_TEMPLATE; save('injectTemplate'); refreshPreview(); } }, icon('rotate-left'), h('span', {}, 'Reset')),
             ),
             preview,
+            field('Tell the AI to write', (() => {
+                const st = settings();
+                const sel = h('select.iig-input', {
+                    onchange: () => {
+                        st.injectFormat = sel.value;
+                        // The chosen format must be captured, or nothing would generate.
+                        const rule = st.captureRules.find(r => r.id === sel.value);
+                        if (rule && !rule.enabled) { rule.enabled = true; toast.info(`Turned on capture rule "${rule.name}"`); }
+                        save('injectFormat');
+                        refreshPreview();
+                        render();
+                    },
+                }, h('option', { value: 'html' }, 'HTML image tag (most control)'),
+                st.captureRules.map(r => h('option', { value: r.id }, `${r.name}${r.builtin ? ' (simpler)' : ''}`)));
+                sel.value = st.injectFormat || 'html';
+                return sel;
+            })(), 'Simple formats are more reliable with smaller models and use fewer tokens. They are converted by Prompt capture below.'),
             flag('compactHistory', 'Shorten old image tags in the prompt', 'Replaces finished tags with a one-line note. Saves tokens; stops the model copying file paths.'),
         ], { iconName: 'robot' });
+    }
+
+    // ------------------------------------------------------------ prompt capture (regex)
+
+    function captureSection() {
+        const st = settings();
+        const sample = h('textarea.iig-input', { rows: 4, placeholder: 'Paste a sample AI reply to test the enabled rules…', oninput: debounce(() => runTest(), 200) });
+        const out = h('div.iig-stack.iig-capture-out');
+        const runTest = () => {
+            if (!sample.value.trim()) { out.replaceChildren(); return; }
+            const { captured, errors } = applyCapture(sample.value, st.captureRules);
+            out.replaceChildren(
+                ...errors.map(e => h('div.iig-capture-err', {}, icon('triangle-exclamation'), ` ${e.rule}: ${e.error}`)),
+                ...(captured.length
+                    ? captured.map(c => h('div.iig-capture-hit', {}, h('small.iig-muted', {}, c.rule), h('div', {}, c.data.prompt),
+                        h('small.iig-muted', {}, Object.entries(c.data).filter(([k]) => k !== 'prompt').map(([k, v]) => `${k}: ${v}`).join(' · '))))
+                    : [h('small.iig-muted', {}, 'No prompts captured.')]),
+            );
+        };
+        const list = h('div.iig-stack');
+        const draw = () => {
+            list.replaceChildren(...st.captureRules.map((r, i) => {
+                const err = compileRule(r).error;
+                const pattern = h('input.iig-input.mono', {
+                    type: 'text', value: r.pattern, readOnly: !!r.builtin, 'aria-label': 'Pattern', spellcheck: 'false',
+                    oninput: debounce(() => { r.pattern = pattern.value; save('captureRules'); draw(); runTest(); }, 400),
+                });
+                return h(`div.iig-rule${r.enabled ? '.on' : ''}`, {},
+                    h('div.iig-row.between', {},
+                        r.builtin
+                            ? h('strong', {}, r.name)
+                            : h('input.iig-input.narrow-wide', { type: 'text', value: r.name, 'aria-label': 'Rule name', oninput: debounce((e) => { r.name = e.target.value; save('captureRules'); }, 300) }),
+                        toggle('', r.enabled, (v) => { r.enabled = v; save('captureRules'); runTest(); }),
+                    ),
+                    r.builtin ? h('code.iig-pattern', {}, r.pattern) : pattern,
+                    r.builtin ? null : h('input.iig-input', { type: 'text', value: r.example || '', placeholder: 'What the AI should write, e.g. [[draw: PROMPT]]', 'aria-label': 'Example for the AI', oninput: debounce((e) => { r.example = e.target.value; save('captureRules'); updateInjection(); }, 300) }),
+                    err ? h('small.iig-capture-err', {}, err) : null,
+                    r.builtin ? null : h('div.iig-row.wrap', {},
+                        h('input.iig-input.narrow', { type: 'text', value: r.flags || 'gi', 'aria-label': 'Flags', title: 'Regex flags', oninput: debounce((e) => { r.flags = e.target.value; save('captureRules'); draw(); runTest(); }, 300) }),
+                        h('select.iig-input.narrow', { 'aria-label': 'Kind', onchange: (e) => { r.kind = e.target.value; save('captureRules'); } },
+                            h('option', { value: 'image', selected: r.kind !== 'video' }, 'Image'), h('option', { value: 'video', selected: r.kind === 'video' }, 'Video')),
+                        toggle('Keep text', !!r.keepText, (v) => { r.keepText = v; save('captureRules'); }),
+                        h('button.iig-icon-btn', { type: 'button', 'aria-label': 'Delete rule', onclick: () => { st.captureRules.splice(i, 1); if (st.injectFormat === r.id) st.injectFormat = 'html'; save('captureRules'); draw(); } }, icon('trash')),
+                    ),
+                );
+            }));
+        };
+        draw();
+        return section('Prompt capture (regex)', [
+            h('p.iig-muted.small', {}, 'Turn image requests in any format into images. Use a named group (?<prompt>…) or the first group for the prompt; optional groups (?<style>), (?<ar>), (?<size>), (?<neg>). Flags in the prompt like --ar 16:9, --style …, --no … are understood.'),
+            list,
+            h('div.iig-row.wrap', {},
+                h('button.iig-btn.small', {
+                    type: 'button', onclick: () => {
+                        st.captureRules.push({ id: uid('rule'), name: 'My rule', pattern: String.raw`\[\[draw:\s*(?<prompt>[^\]]+)\]\]`, flags: 'gi', enabled: true, kind: 'image', keepText: false, example: '[[draw: PROMPT]]' });
+                        save('captureRules');
+                        draw();
+                    },
+                }, icon('plus'), h('span', {}, 'Add rule')),
+            ),
+            field('Test', sample),
+            out,
+        ], { iconName: 'code' });
     }
 
     // ------------------------------------------------------------ video, behaviour, device
@@ -370,6 +499,7 @@ export function createSettingsTab() {
             defaultsSection(),
             stylesSection(),
             instructionsSection(),
+            captureSection(),
             videoSection(),
             behaviourSection(),
             deviceSection(),

@@ -114,6 +114,7 @@ function serveFile(res, file) {
 const sanitize = s => String(s || '').replace(/[^\p{L}\p{N} _.-]/gu, '_').slice(0, 120);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let rateLimitedOnce = false;
+let lastRequest = null;
 
 // ---------------------------------------------------------------- routes
 
@@ -142,6 +143,36 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, 'OK', 'text/plain');
     }
 
+    if (p === '/mock/_last') return send(res, 200, lastRequest || {});
+
+    // Mock Gemini generateContent: answers with a small "thought" draft image, then the real one.
+    const gem = /^\/mockgem\/v1beta\/models\/([^/:]+):generateContent$/.exec(p);
+    if (gem && req.method === 'POST') {
+        if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'API key not valid' } });
+        const body = JSON.parse(await readBody(req));
+        const parts = body.contents?.[0]?.parts || [];
+        lastRequest = {
+            model: gem[1],
+            generationConfig: body.generationConfig,
+            texts: parts.filter(x => x.text).map(x => x.text),
+            images: parts.filter(x => x.inlineData).length,
+        };
+        await sleep(600);
+        const prompt = lastRequest.texts.join(' ');
+        return send(res, 200, {
+            candidates: [{
+                content: {
+                    parts: [
+                        { text: 'Planning the composition…', thought: true },
+                        { inlineData: { mimeType: 'image/png', data: makePng(32, 32, 'thought').toString('base64') }, thought: true },
+                        { inlineData: { mimeType: 'image/png', data: makePng(300, 400, prompt).toString('base64') } },
+                    ],
+                },
+                finishReason: 'STOP',
+            }],
+        });
+    }
+
     // Mock OpenAI-compatible provider.
     if (p === '/mock/v1/models') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
@@ -150,6 +181,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/mock/v1/images/generations' && req.method === 'POST') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
         const body = JSON.parse(await readBody(req));
+        lastRequest = { ...body, image: Array.isArray(body.image) ? body.image.length : body.image ? 1 : 0 };
         const prompt = String(body.prompt || '');
         await sleep(Number(process.env.MOCK_DELAY) || 1200 + Math.random() * 1500);
         if (/\bfail\b/i.test(prompt)) return send(res, 400, { error: { message: 'Mock provider refused this prompt (contains "fail")' } });

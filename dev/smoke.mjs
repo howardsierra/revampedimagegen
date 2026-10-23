@@ -27,7 +27,7 @@ const check = (cond, msg) => {
     if (!cond) { failures++; console.log(`  FAIL ${msg}`); } else console.log(`  ok   ${msg}`);
 };
 
-for (const d of devices) {
+for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(',').includes(x.name))) {
     console.log(`\n# ${d.name}`);
     const ctx = await browser.newContext({ viewport: d.viewport, isMobile: d.isMobile, hasTouch: d.hasTouch, deviceScaleFactor: d.deviceScaleFactor });
     const page = await ctx.newPage();
@@ -206,6 +206,98 @@ for (const d of devices) {
     await page.evaluate(() => window.harness.switchChat('Elodie - 2026-10-23'));
     await page.waitForFunction(() => window.harness.chat[4].mes.includes('/user/images/'), null, { timeout: 5000 });
     check(true, 'parked result applied after returning to the chat');
+
+    if (d.name === 'desktop') {
+        const S = () => window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+
+        // Regex capture: a simple [IMG: …] request becomes a real image with its flags applied.
+        await page.evaluate(async () => {
+            const s = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            s.captureRules.find(r => r.id === 'bracket').enabled = true;
+            await window.harness.addAiMessage('They reach the cliff. [IMG: Lodi on a windy cliff at sunset --ar 16:9 --style watercolor] She laughs.');
+        });
+        const capIdx = await page.evaluate(() => window.harness.chat.length - 1);
+        await page.waitForFunction((i) => window.harness.chat[i].mes.includes('/user/images/'), capIdx, { timeout: 15000 });
+        const capMes = await page.evaluate((i) => window.harness.chat[i].mes, capIdx);
+        check(!capMes.includes('[IMG: ') && capMes.includes('"aspect_ratio":"16:9"') && capMes.includes('"style":"watercolor"'), 'regex capture turned [IMG: …] into a generated image');
+        const lastOpenAi = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(lastOpenAi.prompt?.includes('watercolor') && lastOpenAi.prompt.includes('Lodi on a windy cliff'), 'captured style and prompt reached the provider');
+
+        // "Use as ref" from the viewer → character layer.
+        await page.evaluate((i) => document.querySelector(`#chat .mes[mesid="${i}"] img.iig-img`).scrollIntoView({ block: 'center' }), capIdx);
+        await page.locator(`#chat .mes[mesid="${capIdx}"] img.iig-img`).click();
+        await page.waitForSelector('.iig-viewer.is-open');
+        await page.locator('.iig-viewer-act', { hasText: 'Use as ref' }).click();
+        await page.waitForSelector('.iig-modal.is-open');
+        await page.locator('.iig-modal .iig-chip', { hasText: 'This character' }).click();
+        await page.locator('.iig-modal .iig-btn.primary').click();
+        await page.waitForFunction(() => !!window.SillyTavern.getContext().extensionSettings.revamped_image_gen.charRefSets?.['elodie.png']?.char?.path, null, { timeout: 10000 });
+        check(true, 'use-as-ref saved a character-layer reference');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+        check(await page.locator('.iig-viewer').isHidden(), 'focus returns to the viewer after the ref picker (Esc closes it)');
+
+        // Nano Banana via Gemini: thought images skipped, refs labelled, ratio/size mapped.
+        await page.evaluate(() => {
+            const s = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            Object.assign(s, { provider: 'gemini', endpoint: `${location.origin}/mockgem`, model: 'gemini-3-pro-image' });
+        });
+        await page.evaluate(() => window.RevampedImageGen.open('create'));
+        await page.fill('.iig-prompt', 'Elodie by the window, rainy evening');
+        check(!(await page.locator('#iig-tab-create .iig-chip[data-value="4K"]').isDisabled()), 'Nano Banana Pro offers 4K');
+        const item = await page.evaluate(() => window.RevampedImageGen.generate('Elodie smiling, close-up', { aspect_ratio: '4:5', image_size: '2K' }));
+        const g = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(g.generationConfig?.imageConfig?.aspectRatio === '3:4' && g.generationConfig.imageConfig.imageSize === '2K', 'Gemini: 4:5 mapped to 3:4, imageSize 2K sent');
+        check(g.images === 1 && g.texts.some(t => t === 'Reference image 1 — Elodie:'), 'Gemini: character reference sent and labelled');
+        const dims = await page.evaluate((src) => new Promise(r => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.src = src; }), item.src);
+        check(dims[0] === 300 && dims[1] === 400, `Gemini: final image kept, thought draft skipped (${dims.join('x')})`);
+
+        // Layers: a chat-layer ref exists only in its chat; muting hides an inherited one.
+        await page.locator('.iig-tab[data-tab="refs"]').click();
+        await page.locator('#iig-tab-refs .iig-chip', { hasText: 'This chat' }).click();
+        await page.evaluate(async (src) => {
+            const meta = window.SillyTavern.getContext().chatMetadata;
+            meta.iig_refs = { char: { name: '', path: '', always: false }, user: { name: '', path: '', always: false }, npcs: [{ id: 'n1', name: 'Axel', path: src, always: false }], muted: [] };
+        }, item.src);
+        const testRefs = async (prompt) => {
+            await page.evaluate(() => window.RevampedImageGen.open('refs'));
+            await page.waitForTimeout(200);
+            const input = page.locator('#iig-tab-refs input[placeholder^="Type a prompt"]');
+            await input.fill(prompt);
+            await page.waitForTimeout(250);
+            return page.locator('#iig-tab-refs .iig-chip.static').allInnerTexts();
+        };
+        let chips = await testRefs('Axel and Elodie on the stairs');
+        check(chips.length === 2 && chips.some(t => t.includes('Axel') && t.includes('This chat')) && chips.some(t => t.includes('Elodie') && t.includes('This character')), `layers merge in this chat (${chips.join(' | ')})`);
+        await page.evaluate(() => window.harness.switchChat('Second chat'));
+        await page.waitForTimeout(400);
+        chips = await testRefs('Axel and Elodie on the stairs');
+        check(chips.length === 1 && chips[0].includes('Elodie'), 'other chat: only the character-layer ref applies');
+        await page.locator('#iig-tab-refs .iig-chip', { hasText: 'This chat' }).click();
+        await page.locator('#iig-tab-refs .iig-inherit-row button').first().click();
+        chips = await testRefs('Axel and Elodie on the stairs');
+        check(chips.length === 0, 'muting the inherited ref removes it for this chat only');
+        await page.evaluate(() => window.harness.switchChat('Elodie - 2026-10-23'));
+        await page.waitForTimeout(400);
+        chips = await testRefs('Elodie');
+        check(chips.length === 1, 'mute does not leak into other chats');
+        await shot('9-refs-layers');
+        await page.locator('.iig-tab[data-tab="settings"]').click();
+        await page.locator('details.iig-section summary', { hasText: 'Connection' }).click();
+        await page.waitForTimeout(200);
+        await shot('9-settings-connection');
+        await page.locator('details.iig-section summary', { hasText: 'Prompt capture' }).click();
+        await page.locator('details.iig-section summary', { hasText: 'Connection' }).click();
+        await page.waitForTimeout(150);
+        await page.fill('.iig-capture-out >> xpath=preceding::textarea[1]', 'Hi <image>Robin under the lanterns --ar 3:4</image>');
+        await page.waitForTimeout(350);
+        check((await page.locator('.iig-capture-hit').count()) === 0, 'tester ignores disabled rules');
+        await page.locator('.iig-rule', { hasText: '<image>prompt</image>' }).locator('.iig-switch').click();
+        await page.waitForTimeout(350);
+        check((await page.locator('.iig-capture-hit').count()) === 1, 'tester shows captures for an enabled rule');
+        await page.locator('.iig-capture-hit').scrollIntoViewIfNeeded();
+        await shot('9-settings-capture');
+    }
 
     check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
     await ctx.close();

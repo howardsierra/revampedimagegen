@@ -21,3 +21,16 @@ Video (only when the user explicitly asks for a video or animation — it is slo
 <img data-iig-video='{"prompt":"PROMPT","duration":4,"resolution":"720p","aspect_ratio":"16:9"}' src="[VID:GEN]">
 Name characters in the prompt to use their photo as an identity reference; add "ref_mode":"first_frame" only to animate the photo itself.
 ```
+
+## Simpler alternative (needs Prompt capture)
+
+Smaller models often get the quoting of the HTML tag wrong. With **Settings → Prompt capture → `[IMG: prompt]`** enabled, you can use this shorter instruction instead:
+
+```text
+[Image generation is available.]
+When a moment is worth showing, write (at most 2 per reply, between paragraphs):
+[IMG: PROMPT --ar RATIO --style STYLE]
+- PROMPT: a detailed English description (60+ words): subject, appearance, pose, expression, setting, lighting, mood, camera framing.
+- Refer to characters by FIRST NAME — names are how reference photos are matched.
+- RATIO: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9 or 21:9. --style and --no THINGS_TO_AVOID are optional.
+```

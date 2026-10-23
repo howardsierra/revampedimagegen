@@ -24,9 +24,65 @@ If you used notsosillynotsoimages, open **Settings → Import & diagnostics → 
 
 ## Quick start
 
-1. **Settings → Connection**: pick an API type, paste the endpoint and key, tap **Fetch** and choose a model, then tap **Test**.
+1. **Settings → Connection → Quick setup**: tap **Nano Banana** (Google AI Studio key), **GPT Image** (OpenAI key) or **Both via OpenRouter**. Paste your key, pick a model chip, then tap **Test**.
 2. Chat as usual. **AI instructions** are on by default, so the chat model is already told how to write image tags. You don't need to edit your preset.
 3. Images show up in the reply as they finish, with a live placeholder (status, elapsed time, Cancel) while they generate.
+
+## Tuned for Nano Banana and GPT Image
+
+The extension knows what each model can do and adjusts every request. Model IDs come from the official SDKs (openai 7.43, @google/genai 2.31).
+
+| Model | IDs | Sizes | Reference photos |
+|---|---|---|---|
+| Nano Banana | `gemini-2.5-flash-image` | 1K | up to 3 |
+| Nano Banana 2 / 2.1 | `gemini-3.1-flash-image`, `gemini-nano-banana-2.1` | 512–4K | 5 people by default, up to 14 images |
+| Nano Banana 2 Lite | `gemini-3.1-flash-lite-image` | 512, 1K | up to 3 |
+| Nano Banana Pro | `gemini-3-pro-image`, `nano-banana-pro-preview` | 1K, 2K, 4K | 5 people by default, up to 14 images |
+| GPT Image 2 / 2.5 | `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst` | any size up to 3840×2160 | 5 by default, up to 16 |
+| GPT Image 1.x | `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` | 1024 square, 3:2, 2:3 | 4 by default, up to 16 |
+
+- **Nano Banana:**
+  - Each reference photo is sent with a label ("Reference image 1 — Elodie:"), so several characters don't blur together.
+  - Aspect ratios the model doesn't support are mapped to the nearest one (4:5 → 3:4), and sizes are clamped to what the model can make.
+  - Draft "thought" images from thinking models are skipped, so you always get the final picture.
+- **GPT Image:**
+  - On gpt-image-2 and 2.5, the exact size is computed from your aspect ratio and 1K/2K/4K choice, within OpenAI's limits.
+  - Reference photos go to the official `/v1/images/edits` endpoint, with their names listed in order in the prompt.
+  - Options: **High input fidelity** (gpt-image-1.x keeps faces closer to the references), **Moderation: low**, and **WebP/JPEG output** for smaller files.
+  - Quality offers `xhigh`/`max` on 2.5.
+- **Aggregators:** if a proxy rejects one of the newer parameters, it is dropped and the request retried once.
+- The **Create** tab greys out sizes the selected model can't produce. **Max photos per image** defaults to the model's sensible limit.
+
+## References per chat, per character, or everywhere
+
+References live in three layers. The most specific one wins:
+
+- **This chat**: only this chat.
+- **This character**: every chat with this character card.
+- **All chats**: everywhere.
+
+The main character and You come from the most specific layer that has a photo. Extra characters are merged from all three layers.
+
+In the **Refs** tab, pick the layer you're editing. The **Inherited** list shows photos coming from the other layers; in a chat you can **mute** any of them for just that chat.
+
+To lock in a look you like, open any generated image and tap **Use as ref**. Choose the character, or create a new one, and the layer to save it in.
+
+## Regex prompt capture
+
+The AI doesn't have to write HTML. Under **Settings → Prompt capture**, enable a rule and the extension turns matching text in replies into images:
+
+| Rule | The AI writes |
+|---|---|
+| `[IMG: prompt]` | `[IMG: Lodi on a windy cliff --ar 16:9 --style watercolor]` |
+| `<image>prompt</image>` | `<image>Robin under the lanterns --ar 3:4</image>` |
+| hidden comment | `<!-- image: a stormy harbour -->` (never visible to the reader) |
+| `Image prompt:` line | `**Image prompt:** Elodie laughing in the rain` |
+| your own regex | Use the named group `(?<prompt>…)` or the first capture group. Optional groups `(?<style>)`, `(?<ar>)`, `(?<size>)`, `(?<neg>)` fill the other fields. |
+
+- Flags at the end of a prompt are understood: `--ar 16:9`, `--style …`, `--size 2K`, `--no …`, `--seed 42`.
+- Text inside existing image tags is never touched.
+- A tester shows live what each enabled rule captures from a sample reply.
+- **AI instructions → Tell the AI to write** switches the injected instructions to the format you chose. Simple formats are more reliable with smaller models and cost fewer tokens.
 
 ## What's new compared to notsosillynotsoimages
 
@@ -76,7 +132,7 @@ If you used notsosillynotsoimages, open **Settings → Import & diagnostics → 
 - Name matching is Unicode-aware, so Cyrillic, accented and other non-Latin names match as whole words.
 - One-tap **Card avatar** to use the character's card image as their reference.
 - A **match tester**: type a prompt and see exactly which photos would be sent.
-- References can be shared by all chats, or kept per chat, as before.
+- Three layers (this chat, this character, all chats), per-chat muting of inherited photos, and **Use as ref** from any generated image. See [References](#references-per-chat-per-character-or-everywhere).
 
 **Mobile quality-of-life**
 - Keeps the screen awake while generating, so phones don't sleep and drop long requests.
@@ -128,7 +184,8 @@ Other extensions can call `window.RevampedImageGen.generate(prompt, { aspect_rat
 - **Settings, profiles and API keys**: SillyTavern's `settings.json`, under `extension_settings.revamped_image_gen`. That's the same place SillyTavern keeps everything else. Keys are masked in logs and exports.
 - **Generated images**: `user/images/<character>/` on your SillyTavern server, via SillyTavern's own upload API.
 - **Reference photos**: `user/images/iig_refs/`, the same folder the original extension used.
-- **Studio history and per-chat references**: inside each chat's metadata.
+- **Studio history and the "This chat" reference layer**: inside each chat's metadata.
+- **"This character" reference layer**: `settings.json`, keyed by the character card's avatar file.
 
 ## Troubleshooting
 
@@ -145,7 +202,7 @@ Other extensions can call `window.RevampedImageGen.generate(prompt, { aspect_rat
 ## Development
 
 ```bash
-npm test                         # tag parser unit tests (node --test)
+npm test                         # tag parser, capture and model unit tests (node --test)
 npx eslint index.js src          # lint
 node dev/server.mjs              # mock SillyTavern + mock provider on http://localhost:8123
 node dev/smoke.mjs               # end-to-end run at phone, tablet and desktop sizes (Playwright)
@@ -164,6 +221,8 @@ node dev/smoke.mjs               # end-to-end run at phone, tablet and desktop s
 ```
 index.js            entry: SillyTavern events, menus, slash commands
 src/tags.js         tag parser / rewriter (pure, unit-tested)
+src/capture.js      regex prompt capture (pure, unit-tested)
+src/models.js       model capabilities, sizes, quick-setup recipes (pure, unit-tested)
 src/providers.js    OpenAI, Gemini, OpenRouter, Naistera, SD WebUI, Pollinations, video
 src/engine.js       resolve options → refs → provider (with retry) → save
 src/queue.js        concurrency-limited job queue, wake lock

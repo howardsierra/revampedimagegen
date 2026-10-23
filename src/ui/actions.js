@@ -10,9 +10,11 @@ import { toast, IS_TOUCH } from '../st.js';
 import { copyText, downloadUrl } from './dom.js';
 import { openEditor, confirmDialog } from './editor.js';
 import { openViewer } from './viewer.js';
+import { openRefPicker } from './ref-picker.js';
 import * as panel from './panel.js';
 
 const download = { icon: 'download', label: 'Save', run: (item) => downloadUrl(item.src) };
+const asRef = { icon: 'user-check', label: 'Use as ref', run: (item) => openRefPicker(item) };
 const copy = {
     icon: 'copy', label: 'Copy prompt', run: async (item) => {
         if (await copyText(item.prompt || '')) toast.success('Prompt copied');
@@ -48,6 +50,7 @@ export function chatItemActions(item) {
         },
         { icon: 'location-crosshairs', label: 'Go to message', run: (_, { close }) => { closeAll(close); chat.jumpToMessage(item.mesId); } },
     ];
+    if (!isError && item.kind !== 'video') list.push(asRef);
     if (!isError) list.push(download);
     list.push(copy);
     if (!isError) {
@@ -81,6 +84,7 @@ export function studioItemActions(item, { usePrompt } = {}) {
             }),
         },
         usePrompt ? { icon: 'arrow-up-from-bracket', label: 'Use prompt', run: (_, { close }) => { usePrompt(item); close(); } } : null,
+        item.kind !== 'video' ? asRef : null,
         download,
         copy,
         {

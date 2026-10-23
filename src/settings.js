@@ -4,6 +4,7 @@
  */
 
 import { MODULE, LEGACY_MODULE, DEFAULT_STYLES, DEFAULT_INJECT_TEMPLATE } from './constants.js';
+import { defaultRules, BUILTIN_RULES } from './capture.js';
 import { ctx, log, setSecretsToMask, uid } from './st.js';
 
 export const DEFAULTS = Object.freeze({
@@ -18,6 +19,9 @@ export const DEFAULTS = Object.freeze({
     pathOverride: '',
     useCorsProxy: false,
     openaiRefMode: 'auto',          // auto | json | multipart
+    openaiFidelity: true,           // input_fidelity: high on gpt-image-1.x when references are sent
+    openaiModeration: 'auto',       // auto | low
+    openaiFormat: 'png',            // png | jpeg | webp
     sendRefs: true,
     naisteraModel: 'grok',
     naisteraPreset: '',
@@ -56,10 +60,15 @@ export const DEFAULTS = Object.freeze({
     injectMax: 2,
     injectTemplate: DEFAULT_INJECT_TEMPLATE,
     compactHistory: false,
+    injectFormat: 'html',           // html | id of a capture rule the AI is told to use
+
+    // Regex prompt capture: turn other formats in AI replies into image tags.
+    captureRules: defaultRules(),
 
     // References
-    refScope: 'global',             // global | chat
-    maxRefs: 4,
+    refsEditLayer: 'chat',          // chat | character | global (which layer the Refs tab edits)
+    maxRefs: 0,                     // 0 = auto (per-model sensible limit)
+    charRefSets: {},
     refs: { char: { name: '', path: '', always: false }, user: { name: '', path: '', always: false }, npcs: [] },
 
     // Device & UI
@@ -96,6 +105,11 @@ export function settings() {
             if (!Object.hasOwn(s, k)) s[k] = structuredClone(v);
         }
         if (!s.refs || typeof s.refs !== 'object') s.refs = structuredClone(DEFAULTS.refs);
+        if (!Array.isArray(s.captureRules)) s.captureRules = defaultRules();
+        // Add built-in rules introduced after the user's settings were created.
+        for (const b of BUILTIN_RULES) {
+            if (!s.captureRules.some(r => r.id === b.id)) s.captureRules.push({ id: b.id, name: b.name, pattern: b.pattern, flags: b.flags, enabled: false, builtin: true, kind: 'image' });
+        }
         normalizeRefSet(s.refs);
         cached = s;
         refreshSecrets();
@@ -174,6 +188,16 @@ export function updateActiveProfile() {
 }
 
 // ---------------------------------------------------------------- references
+//
+// Three layers, most specific first:
+//   chat       this chat only            (chat metadata: iig_refs)
+//   character  every chat with this card (settings.charRefSets[avatar])
+//   global     every chat                (settings.refs)
+// The effective set takes Character/You from the most specific layer that has
+// a photo, and merges extra characters from all layers (same name → specific
+// wins). A chat can mute inherited photos it does not want.
+
+export const LAYERS = Object.freeze(['chat', 'character', 'global']);
 
 function normalizeSlot(slot) {
     const out = { name: '', path: '', always: false, ...(slot || {}) };
@@ -183,50 +207,124 @@ function normalizeSlot(slot) {
     return out;
 }
 
+export function emptyRefSet() {
+    return { char: normalizeSlot(), user: normalizeSlot(), npcs: [] };
+}
+
 function normalizeRefSet(set) {
     set.char = normalizeSlot(set.char);
     set.user = normalizeSlot(set.user);
     set.npcs = Array.isArray(set.npcs) ? set.npcs.map(n => ({ id: n.id || uid('npc'), ...normalizeSlot(n) })) : [];
+    if (!Array.isArray(set.muted)) set.muted = [];
     return set;
 }
 
-export function isPerChat() {
-    return settings().refScope === 'chat';
+/** Key for the character layer: the card's avatar file, or the group id. */
+export function characterKey() {
+    const c = ctx();
+    if (c.groupId) return `group:${c.groupId}`;
+    const a = c.characters?.[c.characterId]?.avatar;
+    return a && a !== 'none' ? a : '';
 }
 
-/** The ref set used for generation: this chat's own set if it has one, else global. */
-export function activeRefs() {
+/** A layer's set, or null if it does not exist (and `create` is false). */
+export function refLayer(layer, { create = false } = {}) {
     const s = settings();
-    if (s.refScope === 'chat') {
-        const meta = ctx().chatMetadata;
-        if (meta?.iig_refs) return normalizeRefSet(meta.iig_refs);
+    if (layer === 'global') return s.refs;
+    if (layer === 'character') {
+        const key = characterKey();
+        if (!key) return null;
+        if (!s.charRefSets || typeof s.charRefSets !== 'object') s.charRefSets = {};
+        if (!s.charRefSets[key] && create) s.charRefSets[key] = emptyRefSet();
+        return s.charRefSets[key] ? normalizeRefSet(s.charRefSets[key]) : null;
     }
-    return s.refs;
+    const meta = ctx().chatMetadata;
+    if (!meta || !chatIdSafe()) return null;
+    if (!meta.iig_refs && create) meta.iig_refs = emptyRefSet();
+    return meta.iig_refs ? normalizeRefSet(meta.iig_refs) : null;
 }
 
-export function chatHasOwnRefs() {
-    return !!ctx().chatMetadata?.iig_refs;
+function chatIdSafe() {
+    try { return ctx().getCurrentChatId?.() || ''; } catch { return ''; }
 }
 
-/** The ref set to edit. In per-chat mode the first edit forks the global set into the chat. */
-export function editableRefs() {
-    const s = settings();
-    if (s.refScope !== 'chat') return s.refs;
+export function layerAvailable(layer) {
+    if (layer === 'global') return true;
+    if (layer === 'character') return !!characterKey();
+    return !!chatIdSafe() && !!ctx().chatMetadata;
+}
+
+function mutedPaths() {
+    return new Set(refLayer('chat')?.muted || []);
+}
+
+/**
+ * The references used for generation, each tagged with `layer`.
+ * @returns {{char: object, user: object, npcs: object[]}}
+ */
+export function activeRefs() {
+    const muted = mutedPaths();
+    const sets = LAYERS.map(l => [l, refLayer(l)]).filter(([, set]) => set);
+    const pick = (kind) => {
+        for (const [layer, set] of sets) {
+            const slot = set[kind];
+            if (slot?.path && !muted.has(slot.path)) return { ...slot, layer };
+        }
+        // No photo anywhere: still return the most specific name so matching hints work.
+        const named = sets.find(([, set]) => set[kind]?.name);
+        return named ? { ...named[1][kind], path: '', layer: named[0] } : { ...normalizeSlot(), layer: 'global' };
+    };
+    const npcs = [];
+    const seen = new Set();
+    for (const [layer, set] of sets) {
+        for (const n of set.npcs || []) {
+            if (!n.path || muted.has(n.path)) continue;
+            const key = n.name.split(',')[0].trim().toLowerCase() || n.path;
+            if (seen.has(key) || seen.has(n.path)) continue;
+            seen.add(key);
+            seen.add(n.path);
+            npcs.push({ ...n, layer });
+        }
+    }
+    return { char: pick('char'), user: pick('user'), npcs };
+}
+
+/** References that apply here but live in a less specific layer (for the "Inherited" list). */
+export function inheritedRefs(editing) {
+    const order = LAYERS.indexOf(editing);
+    const out = [];
+    for (const layer of LAYERS.slice(order + 1)) {
+        const set = refLayer(layer);
+        if (!set) continue;
+        for (const [kind, slot] of [['char', set.char], ['user', set.user], ...set.npcs.map(n => ['npc', n])]) {
+            if (slot?.path) out.push({ ...slot, kind, layer });
+        }
+    }
+    return out;
+}
+
+export function isMuted(path) {
+    return mutedPaths().has(path);
+}
+
+export function setMuted(path, on) {
+    const set = refLayer('chat', { create: true });
+    if (!set) return;
+    set.muted = (set.muted || []).filter(p => p !== path);
+    if (on) set.muted.push(path);
+    saveRefs('chat');
+}
+
+export function saveRefs(layer = 'global') {
     const c = ctx();
-    if (!c.chatMetadata) return s.refs;
-    if (!c.chatMetadata.iig_refs) c.chatMetadata.iig_refs = structuredClone(s.refs);
-    return normalizeRefSet(c.chatMetadata.iig_refs);
-}
-
-export function saveRefs() {
-    const c = ctx();
-    if (isPerChat() && c.chatMetadata?.iig_refs) {
+    if (layer === 'chat') {
         if (typeof c.saveMetadataDebounced === 'function') c.saveMetadataDebounced();
         else c.saveMetadata?.();
     }
     save('refs');
 }
 
+/** Remove this chat's own layer (inherited references keep working). */
 export function resetChatRefs() {
     const c = ctx();
     if (c.chatMetadata?.iig_refs) {
@@ -236,15 +334,15 @@ export function resetChatRefs() {
     save('refs');
 }
 
-/** All server paths referenced by any ref set we know of (for safe cleanup). */
+/** Every server path any known ref set still uses (so shared files are never deleted). */
 export function knownRefPaths() {
     const s = settings();
-    const sets = [s.refs];
+    const sets = [s.refs, ...Object.values(s.charRefSets || {})];
     const meta = ctx().chatMetadata?.iig_refs;
     if (meta) sets.push(meta);
     const out = new Set();
     for (const set of sets) {
-        for (const slot of [set.char, set.user, ...(set.npcs || [])]) if (slot?.path) out.add(slot.path);
+        for (const slot of [set?.char, set?.user, ...(set?.npcs || [])]) if (slot?.path) out.add(slot.path);
     }
     return out;
 }
@@ -278,7 +376,7 @@ export function importLegacy() {
     if (old.videoDuration) s.videoDuration = old.videoDuration;
     if (old.videoResolution) s.videoResolution = old.videoResolution;
     if (typeof old.videoAudio === 'boolean') s.videoAudio = old.videoAudio;
-    if (old.refScope === 'per-chat') s.refScope = 'chat';
+    s.refsEditLayer = old.refScope === 'per-chat' ? 'chat' : 'global';
 
     const slot = (r, always) => ({ name: r?.name || '', path: r?.imagePath || '', always: !!always });
     s.refs = normalizeRefSet({

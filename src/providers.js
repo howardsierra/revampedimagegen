@@ -12,6 +12,7 @@
  */
 
 import { REF_INSTRUCTION } from './constants.js';
+import { clampSize, gptFreeSize, gptStandardSize, modelCaps, nearestRatio } from './models.js';
 import { HttpError, request, requestJson, blobToDataUrl, dataUrlToBlob, splitDataUrl, summarizeBody } from './net.js';
 import { log } from './st.js';
 
@@ -55,10 +56,21 @@ function isGoogleHost(url) {
     try { return new URL(url.replace(/^\/proxy\//, ''), location.href).hostname.endsWith('googleapis.com'); } catch { return false; }
 }
 
-export function composePrompt(req, { styleMode = 'bracket' } = {}) {
+/**
+ * Final prompt text. With references, names them in order so the model knows
+ * which photo is which character ("image 1 is Elodie…"). Providers that label
+ * each image inline pass `listRefs: false`.
+ */
+export function composePrompt(req, { styleMode = 'bracket', listRefs = true } = {}) {
     let p = req.prompt;
     if (req.style) p = styleMode === 'comma' ? `${req.style}, ${p}` : `[Style: ${req.style}] ${p}`;
-    if (req.refs?.length) p = `${REF_INSTRUCTION}\n\n${p}`;
+    if (req.refs?.length) {
+        const labels = req.refLabels || [];
+        const list = listRefs && labels.length
+            ? ` Reference images in order: ${req.refs.map((_, i) => `${i + 1}) ${labels[i] || 'reference'}`).join(', ')}.`
+            : '';
+        p = `${REF_INSTRUCTION}${list}\n\n${p}`;
+    }
     return p;
 }
 
@@ -98,38 +110,48 @@ const OPENAI_FALLBACK_SIZES = {
     '5:4': '1280x1024', '9:16': '1024x1792', '2:3': '1024x1536', '3:4': '1024x1344', '4:5': '1024x1280',
 };
 
-function openaiSizeAndQuality(model, req, s) {
+/** Size/quality/extra params for an OpenAI-style request, per model family. */
+export function openaiParams(model, req, s) {
     const m = String(model).toLowerCase();
+    const caps = modelCaps(m);
     const o = orientation(req.aspectRatio);
     const big = req.imageSize === '2K' || req.imageSize === '4K';
-    if (/gpt-image/.test(m)) {
-        const size = { square: '1024x1024', landscape: '1536x1024', portrait: '1024x1536' }[o];
-        let quality = req.quality && req.quality !== 'auto' ? req.quality : (big ? 'high' : 'auto');
+    if (caps.family === 'gpt-image') {
+        const size = caps.freeSize ? gptFreeSize(req.aspectRatio, req.imageSize) : gptStandardSize(req.aspectRatio);
+        let quality = req.quality && req.quality !== 'auto' ? req.quality : (big && !caps.freeSize ? 'high' : 'auto');
         quality = { standard: 'medium', hd: 'high' }[quality] || quality;
-        if (!['low', 'medium', 'high', 'auto'].includes(quality)) quality = 'auto';
-        return { size, quality };
+        if (!caps.qualities.includes(quality)) quality = caps.qualities.includes('high') && ['xhigh', 'max'].includes(quality) ? 'high' : 'auto';
+        const extra = {};
+        if (s.openaiModeration === 'low') extra.moderation = 'low';
+        if (s.openaiFormat && s.openaiFormat !== 'png') extra.output_format = s.openaiFormat;
+        if (caps.fidelity && s.openaiFidelity && req.refs?.length && !/mini/.test(m)) extra.input_fidelity = 'high';
+        return { size, quality, extra };
     }
     if (/dall-e-3/.test(m)) {
         const size = { square: '1024x1024', landscape: '1792x1024', portrait: '1024x1792' }[o];
-        return { size, quality: big || req.quality === 'hd' || req.quality === 'high' ? 'hd' : 'standard', b64: true };
+        return { size, quality: big || req.quality === 'hd' || req.quality === 'high' ? 'hd' : 'standard', b64: true, extra: {} };
     }
-    if (/dall-e-2/.test(m)) return { size: '1024x1024', b64: true };
-    return { size: OPENAI_FALLBACK_SIZES[req.aspectRatio] || '1024x1024', quality: req.quality && req.quality !== 'auto' ? req.quality : undefined };
+    if (/dall-e-2/.test(m)) return { size: '1024x1024', b64: true, extra: {} };
+    return { size: OPENAI_FALLBACK_SIZES[req.aspectRatio] || '1024x1024', quality: req.quality && req.quality !== 'auto' ? req.quality : undefined, extra: {} };
 }
 
-function parseOpenAiImage(json) {
+function parseOpenAiImage(json, format = 'png') {
     const d = json?.data?.[0];
-    if (d?.b64_json) return { dataUrl: `data:image/png;base64,${d.b64_json}` };
+    const mime = { jpeg: 'image/jpeg', webp: 'image/webp' }[format] || 'image/png';
+    if (d?.b64_json) return { dataUrl: `data:${mime};base64,${d.b64_json}` };
     if (d?.url) return { url: d.url };
     if (json?.url) return { url: json.url };
     if (json?.error) throw new Error(`Provider error: ${json.error.message || JSON.stringify(json.error)}`);
     throw new Error('No image in provider response');
 }
 
+/** Parameters some aggregators reject; dropped on a 400 that names them. */
+const OPTIONAL_OPENAI = ['input_fidelity', 'moderation', 'output_format', 'quality', 'negative_prompt', 'seed'];
+
 const openai = {
     id: 'openai',
     label: 'OpenAI-compatible',
-    hint: 'POST /v1/images/generations. Works with OpenAI and most aggregators (gpt-image, dall-e, flux…).',
+    hint: 'POST /v1/images/generations (and /edits with references). GPT Image on OpenAI, plus most aggregators.',
     defaultEndpoint: 'https://api.openai.com',
     keyRequired: true,
     supportsRefs: true,
@@ -142,41 +164,53 @@ const openai = {
     },
 
     async generate(req, s) {
-        const { size, quality, b64 } = openaiSizeAndQuality(s.model, req, s);
+        const { size, quality, b64, extra } = openaiParams(s.model, req, s);
         const prompt = composePrompt(req);
         const hasRefs = req.refs.length > 0;
         const native = /api\.openai\.com/i.test(base(s, this));
         const mode = s.openaiRefMode === 'auto' ? (native ? 'multipart' : 'json') : s.openaiRefMode;
         const transport = { timeoutMs: req.timeoutMs, signal: req.signal };
+        const format = extra.output_format || 'png';
 
         if (hasRefs && mode === 'multipart') {
+            // Official /v1/images/edits: multipart, up to 16 images as image[].
             const form = new FormData();
             form.append('model', s.model);
             form.append('prompt', prompt);
             form.append('n', '1');
             form.append('size', size);
             if (quality) form.append('quality', quality);
-            req.refs.forEach((ref, i) => {
+            for (const [k, v] of Object.entries(extra)) form.append(k, v);
+            req.refs.slice(0, 16).forEach((ref, i) => {
                 const blob = dataUrlToBlob(ref);
-                form.append('image[]', blob, `ref${i}.${blob.type.split('/')[1] || 'png'}`);
+                form.append('image[]', blob, `ref${i + 1}.${(blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`);
             });
             const json = await requestJson(apiUrl(s, this, '/v1/images/edits'), { method: 'POST', headers: bearer(s), body: form }, transport);
-            return parseOpenAiImage(json);
+            return parseOpenAiImage(json, format);
         }
 
-        const body = { model: s.model, prompt, n: 1, size };
+        const body = { model: s.model, prompt, n: 1, size, ...extra };
         if (quality) body.quality = quality;
         if (b64) body.response_format = 'b64_json';
         if (req.negative) body.negative_prompt = req.negative;
         if (req.seed != null) body.seed = req.seed;
         if (hasRefs) body.image = req.refs.length === 1 ? req.refs[0] : req.refs;
         const suffix = hasRefs && /gpt-image-2/i.test(s.model) ? '/v1/images/edits' : '/v1/images/generations';
-        const json = await requestJson(apiUrl(s, this, suffix), {
+        const send = () => requestJson(apiUrl(s, this, suffix), {
             method: 'POST',
             headers: { ...bearer(s), 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         }, transport);
-        return parseOpenAiImage(json);
+        try {
+            return parseOpenAiImage(await send(), format);
+        } catch (e) {
+            // Aggregators often reject newer optional params; drop the ones named and try once more.
+            const named = e instanceof HttpError && e.status === 400 ? OPTIONAL_OPENAI.filter(k => k in body && String(e.body).includes(k)) : [];
+            if (!named.length) throw e;
+            log('warn', `Provider rejected ${named.join(', ')}; retrying without`);
+            for (const k of named) delete body[k];
+            return parseOpenAiImage(await send(), body.output_format || 'png');
+        }
     },
 };
 
@@ -196,12 +230,16 @@ function isEmptyEnvelope(r) {
     return !!(um && (um.promptTokenCount === 0 || um.prompt_token_count === 0)) && r.candidates == null;
 }
 
-function parseGemini(result) {
+export function parseGemini(result) {
     const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
+    // Thinking models (Nano Banana Pro/2) may return draft "thought" images before
+    // the final one. Skip thought parts and keep the last real image.
+    let image = null;
     for (const part of candidates[0]?.content?.parts || []) {
         const inline = part.inlineData || part.inline_data;
-        if (inline?.data) return { dataUrl: `data:${inline.mimeType || inline.mime_type || 'image/png'};base64,${inline.data}` };
+        if (inline?.data && !part.thought) image = inline;
     }
+    if (image) return { dataUrl: `data:${image.mimeType || image.mime_type || 'image/png'};base64,${image.data}` };
     const d0 = result?.data?.[0];
     if (d0?.b64_json) return { dataUrl: `data:image/png;base64,${d0.b64_json}` };
     if (d0?.url) return { url: d0.url };
@@ -214,7 +252,7 @@ function parseGemini(result) {
     if (fr && /SAFETY|PROHIBITED|BLOCKLIST|SPII|RECITATION/i.test(fr)) {
         throw Object.assign(new Error(`Blocked by safety filter: ${fr}`), { noRetry: true });
     }
-    const text = candidates[0]?.content?.parts?.map(p => p.text).filter(Boolean).join(' ');
+    const text = candidates[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text).filter(Boolean).join(' ');
     if (text) throw new Error(`Model replied with text instead of an image: "${text.slice(0, 160)}"`);
     if (fr) throw new Error(`Generation stopped without an image (${fr})`);
     throw new Error('No image in Gemini response');
@@ -251,16 +289,26 @@ const gemini = {
         const url = apiUrl(s, this, '/v1beta/models/{model}:generateContent', { model: s.model });
         const headers = geminiHeaders(s, url);
         const transport = { timeoutMs: req.timeoutMs, signal: req.signal };
-        const imageSize = ['1K', '2K', '4K'].includes(req.imageSize) ? req.imageSize : '1K';
+        const caps = modelCaps(s.model);
+        const imageSize = clampSize(req.imageSize, caps.sizes);
+        const aspectRatio = nearestRatio(req.aspectRatio, caps.ratios);
 
-        const send = async (refs, withImageConfig) => {
-            const parts = refs.map(r => {
+        const send = async (refs, { imageConfig = true, sizeField = caps.sendImageSize !== false } = {}) => {
+            // Label each reference inline ("Reference image 1 — Elodie:") — Nano Banana
+            // keeps multiple characters apart far better this way.
+            const parts = [];
+            refs.forEach((r, i) => {
                 const { mime, b64 } = splitDataUrl(r);
-                return { inlineData: { mimeType: mime, data: b64 } };
+                const label = req.refLabels?.[i];
+                if (label) parts.push({ text: `Reference image ${i + 1} — ${label}:` });
+                parts.push({ inlineData: { mimeType: mime, data: b64 } });
             });
-            parts.push({ text: composePrompt({ ...req, refs }) });
+            parts.push({ text: composePrompt({ ...req, refs }, { listRefs: false }) });
             const generationConfig = { responseModalities: ['TEXT', 'IMAGE'] };
-            if (withImageConfig) generationConfig.imageConfig = { aspectRatio: req.aspectRatio, imageSize };
+            if (imageConfig) {
+                generationConfig.imageConfig = { aspectRatio };
+                if (sizeField) generationConfig.imageConfig.imageSize = imageSize;
+            }
             return requestJson(url, {
                 method: 'POST',
                 headers,
@@ -269,11 +317,24 @@ const gemini = {
         };
 
         const withConfig = !/gpt-image/i.test(s.model);
-        let result = await send(req.refs, withConfig);
+        let result;
+        try {
+            result = await send(req.refs, { imageConfig: withConfig });
+        } catch (e) {
+            // Older or proxied models can reject imageSize/imageConfig; try once without.
+            if (!(e instanceof HttpError && e.status === 400 && /image_?size|imageconfig|image_config|aspect/i.test(e.body || ''))) throw e;
+            log('warn', 'Provider rejected imageConfig; retrying with aspect ratio only, then without');
+            try {
+                result = await send(req.refs, { imageConfig: true, sizeField: false });
+            } catch (e2) {
+                if (!(e2 instanceof HttpError && e2.status === 400)) throw e2;
+                result = await send(req.refs, { imageConfig: false });
+            }
+        }
         // Some routers silently reject (empty envelope, 0 tokens). Retry once stripped down.
         if (isEmptyEnvelope(result) && (withConfig || req.refs.length)) {
             log('warn', 'Gemini empty envelope; retrying without imageConfig/references');
-            result = await send([], false);
+            result = await send([], { imageConfig: false });
             if (isEmptyEnvelope(result)) throw new Error('Provider returned an empty response even without references — check model access on your account.');
         }
         return parseGemini(result);
@@ -300,8 +361,15 @@ const openrouter = {
     },
 
     async generate(req, s) {
-        const content = req.refs.map(url => ({ type: 'image_url', image_url: { url } }));
-        content.push({ type: 'text', text: `${composePrompt(req)}\n\nAspect ratio: ${req.aspectRatio}.` });
+        const caps = modelCaps(s.model);
+        const content = [];
+        req.refs.forEach((url, i) => {
+            if (req.refLabels?.[i]) content.push({ type: 'text', text: `Reference image ${i + 1} — ${req.refLabels[i]}:` });
+            content.push({ type: 'image_url', image_url: { url } });
+        });
+        content.push({ type: 'text', text: `${composePrompt(req, { listRefs: false })}\n\nAspect ratio: ${req.aspectRatio}.` });
+        const imageConfig = { aspect_ratio: nearestRatio(req.aspectRatio, caps.ratios) };
+        if (caps.family === 'nano-banana' && caps.sendImageSize) imageConfig.image_size = clampSize(req.imageSize, caps.sizes);
         const json = await requestJson(apiUrl(s, this, '/v1/chat/completions'), {
             method: 'POST',
             headers: { ...bearer(s), 'Content-Type': 'application/json', 'X-Title': 'Revamped Image Gen' },
@@ -309,12 +377,12 @@ const openrouter = {
                 model: s.model,
                 messages: [{ role: 'user', content }],
                 modalities: ['image', 'text'],
-                image_config: { aspect_ratio: req.aspectRatio },
+                image_config: imageConfig,
             }),
         }, { timeoutMs: req.timeoutMs, signal: req.signal });
         if (json.error) throw new Error(`Provider error: ${json.error.message || JSON.stringify(json.error)}`);
         const msg = json.choices?.[0]?.message || {};
-        const img = msg.images?.[0];
+        const img = msg.images?.[msg.images.length - 1];
         const url = img?.image_url?.url || img?.url;
         if (url) return url.startsWith('data:') ? { dataUrl: url } : { url };
         const text = typeof msg.content === 'string' ? msg.content : '';

@@ -6,6 +6,7 @@
 
 import { ASPECT_RATIOS, IMAGE_SIZES } from '../constants.js';
 import { describeScene } from '../prompt.js';
+import { modelCaps } from '../models.js';
 import { getProvider } from '../providers.js';
 import * as queue from '../queue.js';
 import { matchRefs } from '../refs.js';
@@ -169,7 +170,18 @@ export function createTab({ show }) {
     function syncKind() {
         const isVideo = (draft.kind || 'image') === 'video';
         sizeField.hidden = isVideo;
+        syncCaps();
         updateRefs();
+    }
+
+    /** Grey out sizes the selected model cannot make (e.g. 4K on original Nano Banana). */
+    function syncCaps() {
+        const caps = modelCaps(settings().model);
+        for (const b of size.el.children) {
+            const ok = caps.sizes.includes(b.dataset.value);
+            b.disabled = !ok;
+            b.title = ok ? b.dataset.value : `${caps.label || 'This model'} does not support ${b.dataset.value}`;
+        }
     }
 
     const el = h('section', {},
@@ -196,7 +208,8 @@ export function createTab({ show }) {
     queue.onQueue((job) => { if (!job || job.meta.source === 'studio') renderResults(); });
     onSettingsChange((key) => {
         if (key === 'styles' || key === 'all') renderStyles();
-        if (['refs', 'provider', 'sendRefs', 'all', 'profile'].includes(key)) updateRefs();
+        if (['refs', 'provider', 'sendRefs', 'all', 'profile', 'model', 'maxRefs'].includes(key)) updateRefs();
+        if (['model', 'provider', 'all', 'profile'].includes(key)) syncCaps();
     });
 
     return {

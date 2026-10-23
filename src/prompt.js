@@ -8,6 +8,7 @@ import { MODULE, SCENE_PROMPT_TEMPLATE } from './constants.js';
 import { knownRefNames } from './refs.js';
 import { settings } from './settings.js';
 import { ctx, getCharName, getUserName, log } from './st.js';
+import { formatInstructions } from './capture.js';
 import { compactTags, parseTags, plainText } from './tags.js';
 
 const IN_CHAT = 1;
@@ -22,6 +23,7 @@ function namesList() {
 export function renderInjection() {
     const s = settings();
     return String(s.injectTemplate || '')
+        .replaceAll('{{iig_format}}', formatInstructions(s.injectFormat, s.captureRules))
         .replaceAll('{{iig_names}}', namesList())
         .replaceAll('{{iig_max}}', String(Math.max(1, Number(s.injectMax) || 1)));
 }

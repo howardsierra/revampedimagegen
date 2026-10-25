@@ -100,8 +100,10 @@ function readBody(req) {
     });
 }
 
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+
 function send(res, status, body, type = 'application/json') {
-    res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...CORS });
     res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
@@ -120,6 +122,8 @@ let lastRequest = null;
 
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    // Lets a real SillyTavern on another port use the mock providers.
+    if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const p = decodeURIComponent(url.pathname);
 
     if (p === '/' || p === '/index.html') return serveFile(res, path.join(ROOT, 'dev', 'harness.html'));

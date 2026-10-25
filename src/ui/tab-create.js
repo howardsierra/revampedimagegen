@@ -29,7 +29,7 @@ export function createTab({ show }) {
         rows: 4,
         value: draft.prompt || '',
         placeholder: 'Describe what to draw. Use character names to attach their reference photos.',
-        oninput: () => { set('prompt', prompt.value); updateRefs(); },
+        oninput: () => { set('prompt', prompt.value); updateRefs(); updateCount(); },
         onkeydown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(); },
     });
     const sceneBtn = h('button.iig-btn.small', {
@@ -41,6 +41,7 @@ export function createTab({ show }) {
                 prompt.value = await describeScene();
                 set('prompt', prompt.value);
                 updateRefs();
+                updateCount();
             } catch (e) {
                 toast.error(e.message);
             } finally {
@@ -49,10 +50,15 @@ export function createTab({ show }) {
             }
         },
     }, icon('wand-magic-sparkles'), h('span', {}, 'From scene'));
-    const clearBtn = h('button.iig-btn.small.ghost', { type: 'button', onclick: () => { prompt.value = ''; set('prompt', ''); updateRefs(); prompt.focus(); } }, icon('eraser'), h('span', {}, 'Clear'));
+    const clearBtn = h('button.iig-icon-btn.iig-compose-clear', { type: 'button', title: 'Clear prompt', 'aria-label': 'Clear prompt', onclick: () => { prompt.value = ''; set('prompt', ''); updateRefs(); updateCount(); prompt.focus(); } }, icon('eraser'));
+    const counter = h('span.iig-compose-count', { 'aria-live': 'polite' });
+    const updateCount = () => {
+        const n = prompt.value.trim() ? prompt.value.trim().split(/\s+/).length : 0;
+        counter.textContent = n ? `${n} word${n === 1 ? '' : 's'}` : '';
+    };
 
     // --- kind
-    const kind = chipSelect([{ value: 'image', label: 'Image' }, { value: 'video', label: 'Video' }], draft.kind || 'image', v => { set('kind', v); syncKind(); });
+    const kind = chipSelect([{ value: 'image', label: 'Image' }, { value: 'video', label: 'Video' }], draft.kind || 'image', v => { set('kind', v); syncKind(); }, { className: 'iig-seg' });
 
     // --- style
     const style = h('input.iig-input', { type: 'text', value: draft.style || '', placeholder: s.defaultStyle ? `Default: ${s.defaultStyle}` : 'Optional', oninput: () => { set('style', style.value); markStyle(); } });
@@ -148,6 +154,7 @@ export function createTab({ show }) {
     const usePrompt = (item) => {
         prompt.value = item.prompt || '';
         set('prompt', prompt.value);
+        updateCount();
         if (item.data?.style) { style.value = item.data.style; set('style', item.data.style); markStyle(); }
         if (item.data?.aspect_ratio) { ar.set(item.data.aspect_ratio); set('aspect_ratio', item.data.aspect_ratio); }
         updateRefs();
@@ -185,9 +192,10 @@ export function createTab({ show }) {
     }
 
     const el = h('section', {},
-        h('div.iig-card', {},
-            h('div.iig-row.between', {}, kind.el, h('div.iig-row', {}, sceneBtn, clearBtn)),
+        h('div.iig-card.iig-compose', {},
+            h('div.iig-compose-head', {}, kind.el, matchMedia('(pointer: fine)').matches ? h('span.iig-compose-hint', {}, 'Ctrl + Enter to generate') : null),
             prompt,
+            h('div.iig-compose-tools', {}, sceneBtn, h('span.iig-grow'), counter, clearBtn),
             refsLine,
         ),
         h('div.iig-card', {},
@@ -203,6 +211,7 @@ export function createTab({ show }) {
 
     renderStyles();
     syncKind();
+    updateCount();
     renderResults();
     onStudioChange(renderResults);
     queue.onQueue((job) => { if (!job || job.meta.source === 'studio') renderResults(); });

@@ -9,6 +9,7 @@
  */
 
 import { DISPLAY_NAME } from '../constants.js';
+import { modelCaps } from '../models.js';
 import { getProvider } from '../providers.js';
 import * as queue from '../queue.js';
 import { save, settings, onSettingsChange } from '../settings.js';
@@ -49,9 +50,12 @@ function applyLayout() {
     if (mode === 'sheet') {
         panel.dataset.snap = s.sheetSnap === 'full' ? 'full' : 'half';
         panel.style.removeProperty('--iig-w');
+        panel.dataset.narrow = innerWidth < 560 ? '1' : '';
     } else {
         const w = Math.min(Math.max(320, Number(s.panelWidth) || 420), Math.round(innerWidth * 0.92));
         panel.style.setProperty('--iig-w', `${w}px`);
+        // Below ~400px five inline tab labels do not fit; stack icon over label.
+        panel.dataset.narrow = w < 400 ? '1' : '';
     }
     document.body.classList.toggle('iig-panel-open', isOpen);
     document.body.dataset.iigDock = isOpen ? mode : '';
@@ -159,6 +163,7 @@ function installResize(handle) {
         panel.classList.remove('is-resizing');
         settings().panelWidth = Math.round(panel.getBoundingClientRect().width);
         save('panelWidth');
+        applyLayout();
     };
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
@@ -248,7 +253,33 @@ function updateSubtitle() {
     if (!sub) return;
     const s = settings();
     const p = getProvider(s.provider);
-    sub.textContent = s.enabled ? `${p.label}${s.model ? ` · ${s.model}` : ''}` : 'Disabled';
+    const friendly = s.model ? (modelCaps(s.model).label || s.model) : '';
+    sub.textContent = s.enabled ? (friendly ? `${friendly} · ${p.label}` : p.label) : 'Paused';
+    sub.title = s.model || '';
+    sub.classList.toggle('is-off', !s.enabled);
+}
+
+function luminanceOf(cssColor) {
+    const probe = h('span', { style: { color: cssColor, display: 'none' } });
+    root.append(probe);
+    const m = /rgba?\(([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(getComputedStyle(probe).color);
+    probe.remove();
+    if (!m) return null;
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lin(+m[1]) + 0.7152 * lin(+m[2]) + 0.0722 * lin(+m[3]);
+}
+
+/**
+ * Adapt to the active theme: readable text on the accent colour (near-black or
+ * white by luminance), and a near-solid base under the translucent theme tint
+ * so page text never shows through the panel (e.g. with ST's "no blur" mode).
+ */
+function syncAccentContrast() {
+    if (!root) return;
+    const accent = luminanceOf('var(--iig-accent)');
+    if (accent != null) root.style.setProperty('--iig-accent-fg', accent > 0.36 ? '#17120c' : '#ffffff');
+    const fg = luminanceOf('var(--iig-fg)');
+    if (fg != null) root.style.setProperty('--iig-base', fg > 0.4 ? '#141418' : '#f7f6f3');
 }
 
 // ---------------------------------------------------------------- open / close / tabs
@@ -277,6 +308,7 @@ export function open(tabId) {
     if (!panel) return;
     isOpen = true;
     panel.hidden = false;
+    syncAccentContrast();
     applyLayout();
     // Next frame so the slide-in transition runs.
     requestAnimationFrame(() => panel.classList.add('is-open'));
@@ -334,8 +366,9 @@ export function mountPanel() {
 
     const grab = h('div.iig-grab', { 'aria-hidden': 'true' }, h('span'));
     const head = h('header.iig-head', {},
+        h('div.iig-head-badge', { 'aria-hidden': 'true' }, icon('palette')),
         h('div.iig-head-title', {},
-            h('div.iig-head-name', {}, icon('palette'), h('span', {}, 'Image Studio')),
+            h('div.iig-head-name', {}, 'Image Studio'),
             h('div.iig-head-sub', {}),
         ),
         h('span.iig-head-pill', { hidden: true }),
@@ -390,4 +423,5 @@ export function mountPanel() {
     updateBadges();
     placeFab();
     applyLayout();
+    syncAccentContrast();
 }

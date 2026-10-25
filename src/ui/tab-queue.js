@@ -46,6 +46,7 @@ export function createQueueTab() {
                 h('div.iig-job-error'),
             ),
             h('div.iig-job-actions'),
+            h('div.iig-job-bar', { 'aria-hidden': 'true' }),
         );
         rows.set(job.id, r);
         return r;
@@ -53,7 +54,11 @@ export function createQueueTab() {
 
     function paint(job, r) {
         r.dataset.status = job.status;
-        r.querySelector('.iig-job-icon').replaceChildren(icon(job.kind === 'video' && job.status === 'done' ? 'film' : STATUS_ICON[job.status]));
+        const thumbSrc = job.status === 'done' && job.kind !== 'video' ? (job.result?.src || job.result?.path) : null;
+        r.querySelector('.iig-job-icon').replaceChildren(thumbSrc
+            ? h('img.iig-job-thumb', { src: thumbSrc, alt: '', loading: 'lazy' })
+            : icon(job.kind === 'video' && job.status === 'done' ? 'film' : STATUS_ICON[job.status]));
+        r.classList.toggle('has-thumb', !!thumbSrc);
         r.querySelector('.iig-job-title').textContent = job.title;
         const where = job.meta.source === 'studio' ? 'Studio' : `Message #${job.meta.mesId}`;
         const elsewhere = job.meta.chatId && job.meta.chatId !== chatId() ? ' · other chat' : '';

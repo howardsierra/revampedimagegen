@@ -23,7 +23,7 @@ export function createGalleryTab({ setPrompt }) {
         { value: 'all', label: 'All' },
         { value: 'chat', label: 'In chat' },
         { value: 'studio', label: 'Studio' },
-    ], filter, v => { filter = v; render(); });
+    ], filter, v => { filter = v; render(); }, { className: 'iig-seg' });
     const search = h('input.iig-input.iig-search', {
         type: 'search', placeholder: 'Search prompts…', 'aria-label': 'Search prompts',
         oninput: debounce(() => { query = search.value.trim().toLowerCase(); render(); }, 150),

@@ -138,13 +138,15 @@ function placeholder(job) {
     const el = h('div.iig-ph', { dataset: { job: job.id }, style: { aspectRatio: ar }, role: 'status', 'aria-live': 'polite' },
         h('div.iig-ph-shimmer'),
         h('div.iig-ph-body', {},
-            h('div.iig-ph-icon', {}, icon(job.kind === 'video' ? 'film' : 'wand-magic-sparkles')),
+            h('div.iig-ph-icon', {}, h('span.iig-ph-ring', { 'aria-hidden': 'true' }), icon(job.kind === 'video' ? 'film' : 'wand-magic-sparkles')),
             h('div.iig-ph-status', {}, job.statusText),
             h('div.iig-ph-time', {}),
+            job.prompt ? h('div.iig-ph-prompt', { title: job.prompt }, job.prompt) : null,
             h('div.iig-ph-actions', {},
                 h('button.iig-ph-btn', { type: 'button', title: 'Cancel', dataset: { act: 'cancel' } }, icon('xmark'), h('span', {}, 'Cancel')),
             ),
         ),
+        h('div.iig-ph-bar', { 'aria-hidden': 'true' }),
     );
     paintPlaceholder(el, job);
     return el;

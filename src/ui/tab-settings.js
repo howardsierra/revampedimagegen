@@ -492,7 +492,7 @@ export function createSettingsTab() {
         const openState = [...el.querySelectorAll('details.iig-section')].map(d => d.open);
         const styleList = h('datalist', { id: 'iig-style-list' }, settings().styles.map(st => h('option', { value: st.value }, st.name)));
         el.replaceChildren(
-            h('div.iig-card', {},
+            h('div.iig-card.iig-card-slim', {},
                 flag('enabled', 'Image generation on', null, () => { updateInjection(); render(); }),
             ),
             connectionSection(),

@@ -6,11 +6,11 @@ The AI writes an image tag in its reply → the extension generates it and drops
 
 It is a rebuild of [notsosillynotsoimages](https://github.com/aceeenvw/notsosillynotsoimages) by aceeenvw and reads the same tag format, so existing chats and presets keep working.
 
-| Phone — generating | Phone — Studio sheet | Tablet — side panel | Desktop — queue |
+| Phone — generating in chat | Phone — Studio sheet | Desktop — Create | Desktop — Queue |
 |---|---|---|---|
-| ![](docs/phone-generating.png) | ![](docs/phone-create.png) | ![](docs/tablet-panel.png) | ![](docs/desktop-queue.png) |
+| ![](docs/phone-generating.png) | ![](docs/phone-create.png) | ![](docs/desktop-create.png) | ![](docs/desktop-queue.png) |
 
-*(Screenshots come from the bundled dev harness with a mock provider, so the "art" is generated gradients.)*
+*(Screenshots are from SillyTavern 1.19 with a mock image provider, so the "art" is generated gradients. Colours follow your SillyTavern theme.)*
 
 ---
 

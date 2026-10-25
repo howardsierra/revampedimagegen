@@ -119,10 +119,18 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
     check(true, 'tap-to-generate works with auto-generate off');
     await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.autoGenerate = true; });
 
+    // The launcher and panel must be on screen (SillyTavern's mobile CSS once pushed them off).
+    const fabBox = await page.locator('#iig-fab').boundingBox();
+    check(fabBox && fabBox.y >= 0 && fabBox.y + fabBox.height <= d.viewport.height && fabBox.x >= 0 && fabBox.x + fabBox.width <= d.viewport.width,
+        `launcher is fully on screen (${fabBox ? `${Math.round(fabBox.x)},${Math.round(fabBox.y)}` : 'missing'})`);
+
     // Panel: open from the FAB, visit each tab.
     await page.locator('#iig-fab').click();
     await page.waitForSelector('.iig-panel.is-open');
     await page.waitForTimeout(350);
+    const panelBox = await page.locator('.iig-panel').boundingBox();
+    check(panelBox && panelBox.y >= 0 && panelBox.y < d.viewport.height - 100 && panelBox.y + panelBox.height <= d.viewport.height + 1,
+        `panel is on screen (y=${panelBox ? Math.round(panelBox.y) : 'missing'}, h=${panelBox ? Math.round(panelBox.height) : 0})`);
     const mode = await page.locator('.iig-panel').getAttribute('data-mode');
     check(mode === (d.name === 'phone' ? 'sheet' : 'right'), `panel layout is ${mode}`);
     await page.fill('.iig-prompt', 'Lodi reading by the lamp, cozy, painterly');

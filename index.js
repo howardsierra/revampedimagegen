@@ -245,4 +245,13 @@ function init() {
     };
     // APP_READY is sticky in ST: listeners added after it fired still run.
     c.eventSource.on(ev.APP_READY, start);
+    // SillyTavern only emits APP_READY at the very end of a long chain of awaits;
+    // if anything in it throws or stalls (an unreachable backend, another
+    // extension's error) the event never comes. Extension settings are already
+    // loaded by the time this module runs, so start anyway once the page is usable.
+    setTimeout(() => {
+        if (started || !document.getElementById('chat')) return;
+        console.warn('[RIG] APP_READY not received after 10s; starting anyway');
+        start();
+    }, 10000);
 })();

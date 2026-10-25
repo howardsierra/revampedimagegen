@@ -12,9 +12,15 @@
     --SmartThemeBorderColor: rgba(255, 255, 255, 0.13); --SmartThemeQuoteColor: #e3a14b;
     --SmartThemeBlurStrength: 10px; --mainFontSize: 15px; --topBarBlockSize: 44px; --bottomFormBlockSize: 56px;
   }
-  html, body { margin: 0; height: 100%; background: #0e0e12; color: var(--SmartThemeBodyColor); font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  #top-bar { position: fixed; top: 0; left: 0; right: 0; height: 44px; display: flex; align-items: center; padding: 0 14px; background: #17171c; border-bottom: 1px solid #2a2a30; z-index: 3000; font-weight: 600; }
-  #sheld { position: fixed; top: 44px; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 860px); display: flex; flex-direction: column; }
+  /* Copied from SillyTavern (style.css + css/mobile-styles.css): the html transform
+     plus a fixed body at <=1000px makes <html> the 0px-tall containing block for
+     position:fixed elements — the reason the Studio vanished on phones. */
+  html { -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-backface-visibility: hidden; -webkit-perspective: 1000; }
+  @media screen and (max-width: 1000px) { body { touch-action: none; overflow: hidden; position: fixed; width: 100%; } }
+  html { margin: 0; }
+  body { margin: 0; height: 100vh; height: 100dvh; background: #0e0e12; color: var(--SmartThemeBodyColor); font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #top-bar { position: absolute; top: 0; left: 0; right: 0; height: 44px; display: flex; align-items: center; padding: 0 14px; background: #17171c; border-bottom: 1px solid #2a2a30; z-index: 3000; font-weight: 600; }
+  #sheld { position: absolute; top: 44px; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 860px); display: flex; flex-direction: column; }
   #chat { flex: 1; overflow-y: auto; padding: 12px; }
   .mes { display: flex; gap: 10px; padding: 10px; border-bottom: 1px solid #222; }
   .mes .avatar { width: 40px; height: 40px; border-radius: 50%; background: #333; flex: none; }

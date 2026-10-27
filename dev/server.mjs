@@ -206,6 +206,8 @@ const server = http.createServer(async (req, res) => {
         const body = JSON.parse(await readBody(req));
         lastRequest = { ...body, imageDataUrl: body.imageDataUrl ? 1 : 0, imageDataUrls: body.imageDataUrls?.length || 0, url: p };
         if (!Object.values(NANO_IMAGE_MODELS).some(m => m.model === body.model)) return send(res, 400, { error: { message: 'Invalid image model specified', type: 'invalid_request_error' } });
+        // Like NanoGPT: a provider can offer fewer tiers than the model has.
+        if (Math.max(...String(body.size).split('x').map(Number)) > 3000) return send(res, 400, { error: { message: 'Nano Banana Pro supports 1K or 2K resolution.' } });
         await sleep(300);
         return send(res, 200, { data: [{ b64_json: makePng(300, 300, body.prompt).toString('base64') }] });
     }

@@ -30,7 +30,7 @@ const GPT_Q = ['auto', 'low', 'medium', 'high'];
 const TABLE = [
     // ---- Nano Banana (Gemini image models)
     { re: /gemini-3-pro-image|nano-banana-pro/i, caps: { family: 'nano-banana', label: 'Nano Banana Pro', sizes: ['1K', '2K', '4K'], defaultSize: '2K', rank: 80, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Best quality and text rendering. Up to 14 input images, 5 of them people.' } },
-    { re: /nano-banana-2\.1|gemini-nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 92, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model with high-resolution output.' } },
+    { re: /nano-banana-2\.1|gemini-nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['1K', '2K'], defaultSize: '1K', rank: 92, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model. 1K or 2K (no 512 tier).' } },
     { re: /gemini-3\.1-flash-lite-image|nano-banana-2-lite/i, caps: { family: 'nano-banana', label: 'Nano Banana 2 Lite', sizes: ['512', '1K'], defaultSize: '1K', rank: 40, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 6, qualities: [], sendImageSize: true, note: 'Cheapest and fastest; lower detail.' } },
     { re: /gemini-3\.1-flash-image|nano-banana-2(?![.\d])/i, caps: { family: 'nano-banana', label: 'Nano Banana 2', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 90, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast, good character consistency, up to 4K.' } },
     { re: /gemini-2\.5-flash-image|(^|\/)nano-banana$/i, caps: { family: 'nano-banana', label: 'Nano Banana', sizes: ['1K'], defaultSize: '1K', rank: 60, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 3, qualities: [], sendImageSize: false, note: 'Original Nano Banana. 1K only; works best with up to 3 input images.' } },
@@ -93,6 +93,36 @@ export function modelName(id) {
     return NAMES.get(String(id || '')) || '';
 }
 
+// Sizes a provider told us a model accepts ("supports 1K or 2K resolution"),
+// which beat the table above: providers can offer fewer tiers than Google does.
+const LEARNED = new Map();
+
+/** Remember the sizes a model accepts: { id: ['1K', '2K'] }. */
+export function learnModelSizes(map) {
+    for (const [id, sizes] of Object.entries(map || {})) if (id && Array.isArray(sizes) && sizes.length) LEARNED.set(id, sizes);
+}
+
+/**
+ * Sizes named in a provider error such as "Nano Banana 2.1 supports 1K or 2K
+ * resolution." → ['1K', '2K'], or null when the text is not about sizes.
+ */
+export function parseSupportedSizes(text) {
+    const t = String(text || '');
+    if (!/resolution|image.?size|\bsize/i.test(t)) return null;
+    const m = /support(?:s|ed)?(?:\s+only)?:?\s+((?:(?:0\.5K|512|1K|2K|4K)\b[\s,/]*(?:or|and)?[\s,/]*)+)/i.exec(t);
+    if (!m) return null;
+    const order = ['512', '1K', '2K', '4K'];
+    const found = [...m[1].matchAll(/0\.5K|512|1K|2K|4K/gi)].map(x => (/^(0\.5k|512)$/i.test(x[0]) ? '512' : x[0].toUpperCase()));
+    const sizes = order.filter(x => found.includes(x));
+    return sizes.length ? sizes : null;
+}
+
+function withLearned(id, caps) {
+    const sizes = LEARNED.get(id);
+    if (!sizes) return caps;
+    return { ...caps, sizes, defaultSize: clampSize(caps.defaultSize || '1K', sizes) };
+}
+
 function matchCaps(text) {
     for (const row of TABLE) if (row.re.test(text)) return row.caps;
     return null;
@@ -102,11 +132,11 @@ function matchCaps(text) {
 export function modelCaps(model) {
     const id = String(model || '');
     const byId = matchCaps(id);
-    if (byId) return byId;
+    if (byId) return withLearned(id, byId);
     const name = modelName(id);
     const byName = name ? matchCaps(name.trim().toLowerCase().replace(/\s+/g, '-')) : null;
-    if (byName) return byName;
-    return name ? { ...FALLBACK, label: name } : FALLBACK;
+    if (byName) return withLearned(id, byName);
+    return withLearned(id, name ? { ...FALLBACK, label: name } : FALLBACK);
 }
 
 /** Nearest supported aspect ratio (e.g. 4:5 → 3:4 for Nano Banana). */

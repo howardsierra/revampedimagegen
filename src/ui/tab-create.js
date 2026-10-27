@@ -184,8 +184,7 @@ export function createTab({ show }) {
         updateRefs();
     }
 
-    /** Grey out sizes the selected model cannot make (e.g. 4K on original Nano Banana). */
-    /** Resolution choices follow the selected model. */
+    /** Resolution choices follow the selected model (e.g. no 4K on original Nano Banana). */
     function syncCaps() {
         size.refresh();
         modelBtn.refresh();
@@ -218,7 +217,7 @@ export function createTab({ show }) {
     onSettingsChange((key) => {
         if (key === 'styles' || key === 'all') renderStyles();
         if (['refs', 'provider', 'sendRefs', 'all', 'profile', 'model', 'maxRefs'].includes(key)) updateRefs();
-        if (['model', 'provider', 'all', 'profile'].includes(key)) syncCaps();
+        if (['model', 'provider', 'all', 'profile', 'learnedSizes'].includes(key)) syncCaps();
     });
 
     return {

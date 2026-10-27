@@ -216,6 +216,7 @@ The extension also fixes the most common cause by itself. If your selected model
 |---|---|
 | "Network error" or a CORS error | Turn on **Route through ST CORS proxy**, and set `enableCorsProxy: true` in SillyTavern's `config.yaml`. |
 | 404 on every request | Your endpoint probably needs a documented prefix, such as `/v1` or `/compatible`. Or try the other API type. |
+| "X supports 1K or 2K resolution" | Handled automatically: the extension remembers which sizes that model accepts, retries at the closest one, and hides the others. Diagnose's test image uses your own ratio and resolution, so it catches this too. |
 | NanoGPT: "Invalid image model specified" | Use the **NanoGPT** provider (or the **Both via NanoGPT** quick setup), not OpenAI-compatible. It lists NanoGPT's image models and maps names like `gemini-3-pro-image-preview` to NanoGPT's own id. |
 | 401 / 403 | The key is wrong, or the key can't use that model. |
 | 429 | Lower **Parallel jobs** in Settings → Behaviour. |

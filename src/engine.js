@@ -6,11 +6,11 @@
 
 import { ASPECT_RATIOS, IMAGE_SIZES, VIDEO_RESOLUTIONS } from './constants.js';
 import { withRetry } from './net.js';
-import { sizeFor } from './models.js';
+import { clampSize, learnModelSizes, modelCaps, parseSupportedSizes, sizeFor } from './models.js';
 import { autoProvider, ensureValidModel } from './model-list.js';
 import { generateVideo, getProvider } from './providers.js';
 import { collectRefs } from './refs.js';
-import { settings } from './settings.js';
+import { save, settings } from './settings.js';
 import { log } from './st.js';
 import { persistResult } from './storage.js';
 
@@ -102,19 +102,43 @@ export async function generate(kind, data, { signal, setStatus = () => {}, fromS
     try {
         result = await attempt();
     } catch (e) {
-        // "Model not found" usually means the id is stale or not on this key.
-        // Switch to the matching model the key does have and try once more.
-        if (kind !== 'image' || !isModelNotFound(e)) throw e;
-        setStatus('Model not found — checking your models…');
-        const fixed = await ensureValidModel();
-        if (!fixed.changed) throw e;
-        setStatus(`Retrying with ${fixed.model}…`);
-        result = await attempt();
+        if (kind !== 'image') throw e;
+        // "X supports 1K or 2K resolution": remember that for this model and retry at the closest allowed size.
+        const sizes = e?.status === 400 ? parseSupportedSizes(`${e.body || ''} ${e.message || ''}`) : null;
+        if (sizes) {
+            const next = clampSize(req.imageSize, sizes);
+            learnSizes(s.model, sizes);
+            if (next === req.imageSize) throw e;
+            log('warn', `${s.model} only supports ${sizes.join('/')}; retrying at ${next}`);
+            setStatus(`Retrying at ${next}…`);
+            req.imageSize = next;
+            opts.imageSize = next;
+            result = await attempt();
+        } else {
+            // "Model not found" usually means the id is stale or not on this key.
+            // Switch to the matching model the key does have and try once more.
+            if (!isModelNotFound(e)) throw e;
+            setStatus('Model not found — checking your models…');
+            const fixed = await ensureValidModel();
+            if (!fixed.changed) throw e;
+            setStatus(`Retrying with ${fixed.model}…`);
+            result = await attempt();
+        }
     }
 
     setStatus('Saving…');
     const saved = await persistResult(result, { useCorsProxy: s.useCorsProxy, signal });
     return { ...saved, options: opts, refNames, provider: provider.id, model: kind === 'video' ? s.videoModel : s.model, ms: Date.now() - t0 };
+}
+
+/** Persist the sizes a provider says a model takes, so the size chips and "Auto" follow it. */
+function learnSizes(model, sizes) {
+    const s = settings();
+    const known = modelCaps(model).sizes || [];
+    if (known.join() === sizes.join()) return;
+    s.learnedSizes = { ...(s.learnedSizes || {}), [model]: sizes };
+    learnModelSizes({ [model]: sizes });
+    save('learnedSizes');
 }
 
 export function isModelNotFound(e) {

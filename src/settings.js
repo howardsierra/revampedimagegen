@@ -69,6 +69,7 @@ export const DEFAULTS = Object.freeze({
     refsEditLayer: 'chat',          // chat | character | global (which layer the Refs tab edits)
     maxRefs: 0,                     // 0 = auto (per-model sensible limit)
     charRefSets: {},
+    learnedSizes: {},               // model id -> sizes the provider said it accepts
     refs: { char: { name: '', path: '', always: false }, user: { name: '', path: '', always: false }, npcs: [] },
 
     // Device & UI

@@ -135,7 +135,8 @@ export async function runDiagnostics({ testImage = false, onStep = () => {} } = 
     else {
         const t0 = Date.now();
         try {
-            const res = await generate('image', { prompt: 'a single red apple on a plain white table, soft light, simple product photo', aspect_ratio: '1:1', image_size: 'auto', no_refs: true }, { fromStudio: true });
+            // Your own default ratio and resolution, so size problems show up here too.
+            const res = await generate('image', { prompt: 'a single red apple on a plain white table, soft light, simple product photo', aspect_ratio: s.aspectRatio || '1:1', image_size: s.imageSize || 'auto', no_refs: true }, { fromStudio: true });
             await deleteFile(res.path);
             done({ status: 'ok', detail: `Generated in ${((Date.now() - t0) / 1000).toFixed(1)}s and saved. Generation works — if chat images still fail, the problem is in the prompt or references (check the error on the failed image).` });
         } catch (e) {

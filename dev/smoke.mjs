@@ -315,7 +315,15 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         const nano = await page.evaluate(() => window.RevampedImageGen.generate('Elodie on a balcony', { aspect_ratio: '16:9', image_size: 'auto' }).then(r => ({ ok: !!r?.src }), e => ({ err: e.message })));
         const n = await page.evaluate(async () => (await fetch('/mock/_last')).json());
         check(nano.ok && n.url === '/mocknano/api/v1/images/generations' && n.model === 'nano-banana-pro', `NanoGPT: mapped to its own Nano Banana Pro id and generated (${nano.err || n.model})`);
-        check(n.imageDataUrl === 1 && /^\d+x\d+$/.test(n.size) && n.response_format === 'b64_json', `NanoGPT: reference sent as imageDataUrl, size ${n.size}`);
+        check(n.imageDataUrl === 1 && n.size === '2752x1536' && n.response_format === 'b64_json', `NanoGPT: reference sent as imageDataUrl, Google's 2K 16:9 size (${n.size})`);
+        const nano4k = await page.evaluate(() => window.RevampedImageGen.generate('Elodie in the rain', { aspect_ratio: '9:16', image_size: '4K' }).then(r => ({ ok: !!r?.src }), e => ({ err: e.message })));
+        const n4 = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        const learned = await page.evaluate(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.learnedSizes?.['nano-banana-pro']);
+        check(nano4k.ok && n4.size === '1536x2752' && learned?.join() === '1K,2K', `"supports 1K or 2K" error: learned the sizes and retried at 2K (${nano4k.err || n4.size})`);
+        await page.evaluate(() => window.RevampedImageGen.open('create'));
+        await page.waitForTimeout(300);
+        const nanoChips = await page.locator('#iig-tab-create .iig-size-chips .iig-chip').allInnerTexts();
+        check(!nanoChips.includes('4K'), `size chips drop the tier the provider refused (${nanoChips.join(', ')})`);
 
         // Layers: a chat-layer ref exists only in its chat; muting hides an inherited one.
         await page.locator('.iig-tab[data-tab="refs"]').click();

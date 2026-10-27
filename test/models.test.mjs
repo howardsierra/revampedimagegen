@@ -78,3 +78,17 @@ test('provider display names map unknown ids onto known models', async () => {
     assert.equal(bestModel(['hidream', 'nano-x-pro', 'nano-x-2']), 'nano-x-2');
     assert.equal(modelCaps('nano-banana').label, 'Nano Banana');
 });
+
+test('sizes from provider errors are parsed and learned', async () => {
+    const { parseSupportedSizes, learnModelSizes, modelCaps, sizeFor } = await import('../src/models.js');
+    assert.deepEqual(parseSupportedSizes('Nano Banana 2.1 supports 1K or 2K resolution.'), ['1K', '2K']);
+    assert.deepEqual(parseSupportedSizes('{"error":{"message":"This model supports only 1K resolution"}}'), ['1K']);
+    assert.equal(parseSupportedSizes('Invalid image model specified'), null);
+    assert.deepEqual(modelCaps('gemini-nano-banana-2.1').sizes, ['1K', '2K']);
+    learnModelSizes({ 'nb-pro-test': ['1K', '2K'] });
+    assert.equal(sizeFor('gemini-3-pro-image-preview', '4K'), '4K');
+    assert.deepEqual(modelCaps('gemini-3-pro-image-preview').sizes, ['1K', '2K', '4K']);
+    learnModelSizes({ 'gemini-3-pro-image-preview': ['1K', '2K'] });
+    assert.equal(sizeFor('gemini-3-pro-image-preview', '4K'), '2K');
+    assert.equal(sizeFor('gemini-3-pro-image-preview', 'auto'), '2K');
+});

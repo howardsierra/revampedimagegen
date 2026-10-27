@@ -12,7 +12,7 @@
  */
 
 import { REF_INSTRUCTION } from './constants.js';
-import { clampSize, gptFreeSize, gptStandardSize, modelCaps, nearestRatio } from './models.js';
+import { clampSize, gptFreeSize, gptStandardSize, modelCaps, nearestRatio, parseSupportedSizes } from './models.js';
 import { HttpError, request, requestJson, blobToDataUrl, dataUrlToBlob, splitDataUrl, summarizeBody } from './net.js';
 import { log } from './st.js';
 import { joinUrl, normalizeBase } from './urls.js';
@@ -416,6 +416,33 @@ export function parseNanoImageModels(json) {
     }).filter(m => m.id);
 }
 
+// Google's own pixel sizes per tier, so NanoGPT reads WxH as the tier we meant
+// (a 9:16 "1K" of 576x1024 would otherwise be under 1K).
+const GEMINI_1K = {
+    '1:1': [1024, 1024], '2:3': [848, 1264], '3:2': [1264, 848], '3:4': [896, 1200], '4:3': [1200, 896],
+    '4:5': [928, 1152], '5:4': [1152, 928], '9:16': [768, 1376], '16:9': [1376, 768], '21:9': [1584, 672],
+};
+
+export function nanoDims(model, ar, imageSize) {
+    const caps = modelCaps(model);
+    if (caps.family === 'nano-banana') {
+        const tier = clampSize(imageSize || '1K', caps.sizes);
+        const [w, h] = GEMINI_1K[nearestRatio(ar, Object.keys(GEMINI_1K))];
+        const k = { '512': 0.5, '1K': 1, '2K': 2, '4K': 4 }[tier] || 1;
+        return { width: Math.round(w * k), height: Math.round(h * k) };
+    }
+    if (caps.freeSize) {
+        const [width, height] = gptFreeSize(ar, imageSize).split('x').map(Number);
+        return { width, height };
+    }
+    if (caps.family === 'gpt-image') {
+        const [width, height] = gptStandardSize(ar).split('x').map(Number);
+        return { width, height };
+    }
+    const long = { '512': 768, '1K': 1024, '2K': 2048, '4K': 4096 }[imageSize] || 1024;
+    return dimsFor(ar, imageSize, long);
+}
+
 const nanogpt = {
     id: 'nanogpt',
     label: 'NanoGPT',
@@ -448,8 +475,7 @@ const nanogpt = {
     },
 
     async generate(req, s) {
-        const long = { '512': 768, '1K': 1024, '2K': 2048, '4K': 4096 }[req.imageSize] || 1024;
-        const { width, height } = dimsFor(req.aspectRatio, req.imageSize, long);
+        const { width, height } = nanoDims(s.model, req.aspectRatio, req.imageSize);
         const body = {
             model: s.model,
             prompt: composePrompt(req),
@@ -470,8 +496,9 @@ const nanogpt = {
         try {
             return parseOpenAiImage(await send());
         } catch (e) {
-            // Some models only take their own fixed sizes; fall back to the safe default once.
-            if (!(e instanceof HttpError && e.status === 400 && /size|resolution|dimension/i.test(e.body || '') && body.size !== '1024x1024')) throw e;
+            // "supports 1K or 2K" is handled by the engine (it learns the sizes and retries).
+            // Other size complaints: fall back to the safe default once.
+            if (!(e instanceof HttpError && e.status === 400 && /size|resolution|dimension/i.test(e.body || '') && body.size !== '1024x1024') || parseSupportedSizes(e.body)) throw e;
             log('warn', `NanoGPT rejected size ${body.size}; retrying at 1024x1024`);
             body.size = '1024x1024';
             return parseOpenAiImage(await send());

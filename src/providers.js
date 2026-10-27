@@ -15,23 +15,11 @@ import { REF_INSTRUCTION } from './constants.js';
 import { clampSize, gptFreeSize, gptStandardSize, modelCaps, nearestRatio } from './models.js';
 import { HttpError, request, requestJson, blobToDataUrl, dataUrlToBlob, splitDataUrl, summarizeBody } from './net.js';
 import { log } from './st.js';
+import { joinUrl, normalizeBase } from './urls.js';
 
 // ---------------------------------------------------------------- helpers
 
-const KNOWN_SUFFIXES = [
-    /\/v1\/images\/(generations|edits)$/i,
-    /\/v1\/chat\/completions$/i,
-    /\/v1beta\/models(\/[^?]*)?$/i,
-    /\/v1\/models$/i,
-    /\/api\/generate$/i,
-    /\/sdapi\/v1\/[a-z0-9]+$/i,
-];
-
-export function normalizeBase(endpoint) {
-    let s = String(endpoint || '').trim().replace(/\/+$/, '');
-    for (const re of KNOWN_SUFFIXES) s = s.replace(re, '');
-    return s.replace(/\/+$/, '');
-}
+export { normalizeBase };
 
 function base(s, provider) {
     return normalizeBase(s.endpoint) || provider.defaultEndpoint || '';
@@ -41,10 +29,12 @@ function base(s, provider) {
 export function apiUrl(s, provider, suffix, { model = '', allowOverride = true } = {}) {
     const b = base(s, provider);
     if (!b) throw Object.assign(new Error('No endpoint URL configured'), { noRetry: true });
-    let path = allowOverride && s.pathOverride?.trim() ? s.pathOverride.trim() : suffix;
+    const override = allowOverride && s.pathOverride?.trim();
+    let path = override ? s.pathOverride.trim() : suffix;
     if (!path.startsWith('/')) path = `/${path}`;
     path = path.replace('{model}', encodeURIComponent(model));
-    const url = `${b}${path}`;
+    // A path override is used verbatim; built-in paths never double a "/v1" the base already ends with.
+    const url = override ? `${b}${path}` : joinUrl(b, path);
     return s.useCorsProxy && /^https?:/i.test(url) ? `/proxy/${url}` : url;
 }
 
@@ -392,6 +382,103 @@ const openrouter = {
     },
 };
 
+// ---------------------------------------------------------------- NanoGPT
+//
+// NanoGPT keeps image models apart from chat models: its OpenAI-style
+// /models list is chat models (which can include ids like
+// "gemini-3-pro-image-preview" that its image endpoint rejects with
+// "Invalid image model specified"). Image models are listed at /api/models
+// under models.image and generated at /api/v1/images/generations.
+// Request shapes follow SillyTavern's built-in NanoGPT support
+// (src/endpoints/stable-diffusion.js) and NanoGPT's OpenAI-compatible route.
+
+/** "https://nano-gpt.com/api/v1" (as NanoGPT documents it) → "https://nano-gpt.com". */
+function nanoOrigin(s, provider) {
+    return base(s, provider).replace(/\/api(\/v1)?$/i, '').replace(/\/v1$/i, '') || provider.defaultEndpoint;
+}
+
+function nanoUrl(s, provider, path) {
+    const url = `${nanoOrigin(s, provider)}${path}`;
+    return s.useCorsProxy ? `/proxy/${url}` : url;
+}
+
+/** Image model entries from NanoGPT's various listing shapes → [{id, name}]. */
+export function parseNanoImageModels(json) {
+    let raw = json?.models?.image ?? json?.image ?? json?.data ?? json?.models ?? json;
+    if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+        raw = Object.entries(raw).map(([key, v]) => (v && typeof v === 'object' ? { key, ...v } : { key, name: String(v) }));
+    }
+    if (!Array.isArray(raw)) return [];
+    return raw.map((x) => {
+        if (typeof x === 'string') return { id: x, name: '' };
+        const id = x.model || x.id || x.key || '';
+        return { id: String(id), name: String(x.name || x.displayName || '') };
+    }).filter(m => m.id);
+}
+
+const nanogpt = {
+    id: 'nanogpt',
+    label: 'NanoGPT',
+    hint: 'NanoGPT image models (Nano Banana, GPT Image, Flux, HiDream…) via its image API. One key for many models.',
+    defaultEndpoint: 'https://nano-gpt.com',
+    keyRequired: true,
+    supportsRefs: true,
+    supportsModels: true,
+    supportsVideo: false,
+    imageOnlyList: true,
+
+    async listModels(s) {
+        const attempts = [
+            ['/api/models', { 'x-api-key': s.apiKey }],
+            ['/api/models', bearer(s)],
+            ['/api/v1/image-models?detailed=true', bearer(s)],
+        ];
+        let lastErr;
+        for (const [path, headers] of attempts) {
+            try {
+                const json = await requestJson(nanoUrl(s, this, path), { headers }, { timeoutMs: 30000 });
+                const list = parseNanoImageModels(json);
+                if (list.length) return list;
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        if (lastErr) throw lastErr;
+        return [];
+    },
+
+    async generate(req, s) {
+        const long = { '512': 768, '1K': 1024, '2K': 2048, '4K': 4096 }[req.imageSize] || 1024;
+        const { width, height } = dimsFor(req.aspectRatio, req.imageSize, long);
+        const body = {
+            model: s.model,
+            prompt: composePrompt(req),
+            n: 1,
+            size: `${width}x${height}`,
+            response_format: 'b64_json',
+        };
+        if (req.negative) body.negative_prompt = req.negative;
+        if (req.seed != null) body.seed = req.seed;
+        if (req.refs.length === 1) body.imageDataUrl = req.refs[0];
+        else if (req.refs.length > 1) body.imageDataUrls = req.refs;
+        const url = nanoUrl(s, this, '/api/v1/images/generations');
+        const send = () => requestJson(url, {
+            method: 'POST',
+            headers: { ...bearer(s), 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        }, { timeoutMs: req.timeoutMs, signal: req.signal });
+        try {
+            return parseOpenAiImage(await send());
+        } catch (e) {
+            // Some models only take their own fixed sizes; fall back to the safe default once.
+            if (!(e instanceof HttpError && e.status === 400 && /size|resolution|dimension/i.test(e.body || '') && body.size !== '1024x1024')) throw e;
+            log('warn', `NanoGPT rejected size ${body.size}; retrying at 1024x1024`);
+            body.size = '1024x1024';
+            return parseOpenAiImage(await send());
+        }
+    },
+};
+
 // ---------------------------------------------------------------- Naistera
 
 const NAISTERA_MODELS = ['grok', 'nano banana 2', 'novelai'];
@@ -519,7 +606,7 @@ const pollinations = {
     },
 };
 
-export const PROVIDERS = Object.freeze({ openai, gemini, openrouter, naistera, sdwebui, pollinations });
+export const PROVIDERS = Object.freeze({ openai, gemini, openrouter, nanogpt, naistera, sdwebui, pollinations });
 
 export function getProvider(id) {
     return PROVIDERS[id] || openai;
@@ -536,8 +623,8 @@ export async function generateVideo(req, s) {
     if (!model) throw Object.assign(new Error('No video model set (Settings → Video).'), { noRetry: true });
     const provider = getProvider(s.provider);
     if (!provider.supportsVideo) throw Object.assign(new Error(`${provider.label} does not support video.`), { noRetry: true });
-    const b = base(s, provider).replace(/\/compatible$/i, '').replace(/\/v1(beta)?$/i, '');
-    let url = `${b}/v1/video/generations`;
+    const b = base(s, provider).replace(/\/compatible$/i, '').replace(/\/v1beta$/i, '');
+    let url = joinUrl(b, '/v1/video/generations');
     if (s.useCorsProxy && /^https?:/i.test(url)) url = `/proxy/${url}`;
 
     const body = {

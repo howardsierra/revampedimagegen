@@ -7,7 +7,7 @@
 import { ASPECT_RATIOS, IMAGE_SIZES, VIDEO_RESOLUTIONS } from './constants.js';
 import { withRetry } from './net.js';
 import { sizeFor } from './models.js';
-import { ensureValidModel } from './model-list.js';
+import { autoProvider, ensureValidModel } from './model-list.js';
 import { generateVideo, getProvider } from './providers.js';
 import { collectRefs } from './refs.js';
 import { settings } from './settings.js';
@@ -65,6 +65,7 @@ export function validateConnection(kind = 'image') {
  * { path, persisted, options, refNames, provider, model, ms }.
  */
 export async function generate(kind, data, { signal, setStatus = () => {}, fromStudio = false } = {}) {
+    if (autoProvider() && kind === 'image') await ensureValidModel();
     validateConnection(kind);
     const s = settings();
     const provider = getProvider(s.provider);
@@ -120,7 +121,7 @@ export function isModelNotFound(e) {
     const st = e?.status;
     const body = String(e?.body || e?.message || '');
     if (st !== 404 && st !== 400) return false;
-    return /model/i.test(body) && /not (found|exist|available|support)|unknown model|invalid model|does not exist|no such model|is not found/i.test(body);
+    return /model/i.test(body) && /not (found|exist|available|support)|unknown model|invalid (image )?model|does not exist|no such model|is not found/i.test(body);
 }
 
 export function shortError(e) {

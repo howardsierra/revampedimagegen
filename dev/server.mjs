@@ -119,6 +119,11 @@ let rateLimitedOnce = false;
 // What the mock "accounts" can use. Note: only the -preview Pro id exists, like a real key might.
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-image', 'gemini-3-pro-image-preview', 'text-embedding-004', 'imagen-4.0-generate-001'];
 const OPENAI_MODELS = ['mock-image-1', 'gpt-image-1', 'gpt-image-2', 'flux-dev', 'some-chat-model', 'whisper-1'];
+const NANO_IMAGE_MODELS = {
+    'nano-banana-pro': { model: 'nano-banana-pro', name: 'Nano Banana Pro' },
+    'gemini-flash-edit': { model: 'gemini-flash-edit', name: 'Nano Banana' },
+    'hidream': { model: 'hidream', name: 'HiDream' },
+};
 let lastRequest = null;
 
 // ---------------------------------------------------------------- routes
@@ -187,6 +192,22 @@ const server = http.createServer(async (req, res) => {
                 finishReason: 'STOP',
             }],
         });
+    }
+
+    // Mock NanoGPT: chat list at /api/v1/models holds ids its image endpoint rejects;
+    // real image ids come from /api/models → models.image.
+    if (p === '/mocknano/api/v1/models') return send(res, 200, { data: ['gpt-5', 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image'].map(id => ({ id })) });
+    if (p === '/mocknano/api/models') {
+        if (req.headers['x-api-key'] !== 'test-key' && req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: 'Invalid API key' });
+        return send(res, 200, { models: { text: { 'gpt-5': { model: 'gpt-5', name: 'GPT 5' } }, image: NANO_IMAGE_MODELS } });
+    }
+    if (p === '/mocknano/api/v1/images/generations' && req.method === 'POST') {
+        if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
+        const body = JSON.parse(await readBody(req));
+        lastRequest = { ...body, imageDataUrl: body.imageDataUrl ? 1 : 0, imageDataUrls: body.imageDataUrls?.length || 0, url: p };
+        if (!Object.values(NANO_IMAGE_MODELS).some(m => m.model === body.model)) return send(res, 400, { error: { message: 'Invalid image model specified', type: 'invalid_request_error' } });
+        await sleep(300);
+        return send(res, 200, { data: [{ b64_json: makePng(300, 300, body.prompt).toString('base64') }] });
     }
 
     // Mock OpenAI-compatible provider.

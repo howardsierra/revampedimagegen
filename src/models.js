@@ -30,10 +30,10 @@ const GPT_Q = ['auto', 'low', 'medium', 'high'];
 const TABLE = [
     // ---- Nano Banana (Gemini image models)
     { re: /gemini-3-pro-image|nano-banana-pro/i, caps: { family: 'nano-banana', label: 'Nano Banana Pro', sizes: ['1K', '2K', '4K'], defaultSize: '2K', rank: 80, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Best quality and text rendering. Up to 14 input images, 5 of them people.' } },
-    { re: /nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 92, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model with high-resolution output.' } },
-    { re: /gemini-3\.1-flash-lite-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2 Lite', sizes: ['512', '1K'], defaultSize: '1K', rank: 40, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 6, qualities: [], sendImageSize: true, note: 'Cheapest and fastest; lower detail.' } },
-    { re: /gemini-3\.1-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 90, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast, good character consistency, up to 4K.' } },
-    { re: /gemini-2\.5-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana', sizes: ['1K'], defaultSize: '1K', rank: 60, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 3, qualities: [], sendImageSize: false, note: 'Original Nano Banana. 1K only; works best with up to 3 input images.' } },
+    { re: /nano-banana-2\.1|gemini-nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 92, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model with high-resolution output.' } },
+    { re: /gemini-3\.1-flash-lite-image|nano-banana-2-lite/i, caps: { family: 'nano-banana', label: 'Nano Banana 2 Lite', sizes: ['512', '1K'], defaultSize: '1K', rank: 40, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 6, qualities: [], sendImageSize: true, note: 'Cheapest and fastest; lower detail.' } },
+    { re: /gemini-3\.1-flash-image|nano-banana-2(?![.\d])/i, caps: { family: 'nano-banana', label: 'Nano Banana 2', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 90, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast, good character consistency, up to 4K.' } },
+    { re: /gemini-2\.5-flash-image|(^|\/)nano-banana$/i, caps: { family: 'nano-banana', label: 'Nano Banana', sizes: ['1K'], defaultSize: '1K', rank: 60, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 3, qualities: [], sendImageSize: false, note: 'Original Nano Banana. 1K only; works best with up to 3 input images.' } },
     { re: /^(?!.*imagen).*gemini.*image/i, caps: { family: 'nano-banana', label: 'Gemini image', sizes: ['1K', '2K', '4K'], defaultSize: '1K', rank: 30, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 14, qualities: [], sendImageSize: true, note: '' } },
     { re: /imagen/i, caps: { family: 'imagen', label: 'Imagen', sizes: ['1K', '2K'], defaultSize: '1K', rank: 0, ratios: null, maxRefs: 0, hardRefs: 0, qualities: [], unsupported: 'Imagen uses a different API (:predict) — use a Nano Banana model instead.', note: '' } },
 
@@ -64,7 +64,7 @@ export function bestModel(ids) {
     let bestRank = -1;
     for (const id of ids || []) {
         const c = modelCaps(id);
-        if (c.unsupported || c.family === 'other' || !isImageModelId(id)) continue;
+        if (c.unsupported || c.family === 'other') continue;
         // Prefer stable ids over dated snapshots / previews when ranks tie.
         const rank = c.rank - (/preview|\d{4}-\d{2}-\d{2}|exp/i.test(id) ? 0.5 : 0);
         if (rank > bestRank) { best = id; bestRank = rank; }
@@ -79,11 +79,34 @@ export function sizeFor(model, requested = 'auto') {
     return clampSize(requested, c.sizes);
 }
 
+// Display names some providers report for their own ids (NanoGPT: an id
+// with the name "Nano Banana Pro"). Used when the id alone is not recognised.
+const NAMES = new Map();
+
+/** Remember provider-reported display names: { id: name }. */
+export function registerModelNames(names) {
+    for (const [id, name] of Object.entries(names || {})) if (id && name) NAMES.set(id, String(name));
+}
+
+/** Provider-reported display name for an id, or ''. */
+export function modelName(id) {
+    return NAMES.get(String(id || '')) || '';
+}
+
+function matchCaps(text) {
+    for (const row of TABLE) if (row.re.test(text)) return row.caps;
+    return null;
+}
+
 /** Capabilities for a model id (provider prefixes like "google/" are fine). */
 export function modelCaps(model) {
     const id = String(model || '');
-    for (const row of TABLE) if (row.re.test(id)) return row.caps;
-    return FALLBACK;
+    const byId = matchCaps(id);
+    if (byId) return byId;
+    const name = modelName(id);
+    const byName = name ? matchCaps(name.trim().toLowerCase().replace(/\s+/g, '-')) : null;
+    if (byName) return byName;
+    return name ? { ...FALLBACK, label: name } : FALLBACK;
 }
 
 /** Nearest supported aspect ratio (e.g. 4:5 → 3:4 for Nano Banana). */
@@ -167,6 +190,16 @@ export const RECIPES = [
         provider: 'openrouter',
         endpoint: 'https://openrouter.ai/api',
         keyHint: 'Get a key at openrouter.ai — then tap Fetch to list image models',
+        models: [],
+    },
+    {
+        id: 'nanogpt',
+        title: 'Both via NanoGPT',
+        subtitle: 'NanoGPT key — pay per image',
+        icon: 'bolt',
+        provider: 'nanogpt',
+        endpoint: 'https://nano-gpt.com',
+        keyHint: 'Get a key at nano-gpt.com/api — image models are listed from your account',
         models: [],
     },
 ];

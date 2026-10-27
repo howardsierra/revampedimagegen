@@ -67,3 +67,14 @@ test('auto resolution per model', () => {
     assert.equal(sizeFor('gpt-image-2', '2K'), '2K');
     assert.equal(sizeFor('gpt-image-1', '4K'), '1K');
 });
+
+test('provider display names map unknown ids onto known models', async () => {
+    const { modelCaps, registerModelNames, bestModel } = await import('../src/models.js');
+    registerModelNames({ 'nano-x-pro': 'Nano Banana Pro', 'nano-x-2': 'Nano Banana 2', 'hidream': 'HiDream' });
+    assert.equal(modelCaps('nano-x-pro').label, 'Nano Banana Pro');
+    assert.equal(modelCaps('nano-x-2').label, 'Nano Banana 2');
+    assert.equal(modelCaps('hidream').label, 'HiDream');
+    assert.equal(modelCaps('hidream').family, 'other');
+    assert.equal(bestModel(['hidream', 'nano-x-pro', 'nano-x-2']), 'nano-x-2');
+    assert.equal(modelCaps('nano-banana').label, 'Nano Banana');
+});

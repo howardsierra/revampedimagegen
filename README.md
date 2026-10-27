@@ -24,7 +24,7 @@ If you used notsosillynotsoimages, open **Settings → Import & diagnostics → 
 
 ## Quick start
 
-1. **Settings → Connection → Quick setup**: tap **Nano Banana** (Google AI Studio key), **GPT Image** (OpenAI key) or **Both via OpenRouter**, then paste your key. The extension checks which models your key can actually use and picks the best one automatically. To change it, tap the model button (also at the top of the Create tab).
+1. **Settings → Connection → Quick setup**: tap **Nano Banana** (Google AI Studio key), **GPT Image** (OpenAI key), **Both via OpenRouter** or **Both via NanoGPT**, then paste your key. The extension checks which models your key can actually use and picks the best one automatically. To change it, tap the model button (also at the top of the Create tab).
 2. Chat as usual. **AI instructions** are on by default, so the chat model is already told how to write image tags. You don't need to edit your preset.
 3. Images show up in the reply as they finish, with a live placeholder (status, elapsed time, Cancel) while they generate.
 
@@ -126,6 +126,7 @@ The AI doesn't have to write HTML. Under **Settings → Prompt capture**, enable
 **Providers**
 - OpenAI-compatible, Gemini-compatible and Naistera, as before, plus:
   - **OpenRouter**: chat completions that return images.
+  - **NanoGPT**: its own image API and image-model list. NanoGPT's chat-model list uses different ids, which its image endpoint rejects. A nano-gpt.com endpoint set up as OpenAI-compatible is switched to NanoGPT automatically.
   - **SD WebUI**: your local A1111 or Forge.
   - **Pollinations**: free and keyless, handy for trying things out.
 - Real OpenAI multipart `/v1/images/edits` when you send reference images to api.openai.com.
@@ -215,6 +216,7 @@ The extension also fixes the most common cause by itself. If your selected model
 |---|---|
 | "Network error" or a CORS error | Turn on **Route through ST CORS proxy**, and set `enableCorsProxy: true` in SillyTavern's `config.yaml`. |
 | 404 on every request | Your endpoint probably needs a documented prefix, such as `/v1` or `/compatible`. Or try the other API type. |
+| NanoGPT: "Invalid image model specified" | Use the **NanoGPT** provider (or the **Both via NanoGPT** quick setup), not OpenAI-compatible. It lists NanoGPT's image models and maps names like `gemini-3-pro-image-preview` to NanoGPT's own id. |
 | 401 / 403 | The key is wrong, or the key can't use that model. |
 | 429 | Lower **Parallel jobs** in Settings → Behaviour. |
 | Model answers with text | Pick an image-capable model. **Fetch** highlights the likely ones. |
@@ -245,7 +247,7 @@ index.js            entry: SillyTavern events, menus, slash commands
 src/tags.js         tag parser / rewriter (pure, unit-tested)
 src/capture.js      regex prompt capture (pure, unit-tested)
 src/models.js       model capabilities, sizes, quick-setup recipes (pure, unit-tested)
-src/providers.js    OpenAI, Gemini, OpenRouter, Naistera, SD WebUI, Pollinations, video
+src/providers.js    OpenAI, Gemini, OpenRouter, NanoGPT, Naistera, SD WebUI, Pollinations, video
 src/engine.js       resolve options → refs → provider (with retry) → save
 src/queue.js        concurrency-limited job queue, wake lock
 src/chat.js         message integration, placeholders, parked results

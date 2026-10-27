@@ -5,7 +5,7 @@
 import { ASPECT_RATIOS, DEFAULT_INJECT_TEMPLATE, DEFAULT_STYLES, DISPLAY_NAME, VERSION, VIDEO_RESOLUTIONS } from '../constants.js';
 import { applyCapture, compileRule } from '../capture.js';
 import { RECIPES, modelCaps } from '../models.js';
-import { ensureValidModel, forgetModels } from '../model-list.js';
+import { autoProvider, ensureValidModel, forgetModels } from '../model-list.js';
 import { modelButton } from './model-picker.js';
 import { openDiagnostics } from './diagnose-ui.js';
 import { PROVIDERS, getProvider, normalizeNaisteraModel } from '../providers.js';
@@ -162,7 +162,7 @@ export function createSettingsTab() {
                         toast.info(`${p.label} has no test endpoint — try a generation from the Create tab.`);
                         return;
                     }
-                    const list = await p.listModels(settings());
+                    const list = (await p.listModels(settings())).map(m => (m && typeof m === 'object' ? m.id : m));
                     const m = settings().model;
                     if (m && list.length && !list.includes(m)) toast.warn(`Connected, but "${m}" is not in the provider's model list.`);
                     else toast.success(`Connected${list.length ? ` — ${list.length} models available` : ''}`);
@@ -200,7 +200,7 @@ export function createSettingsTab() {
             field('Quick setup', recipes, 'Tuned presets for Nano Banana and GPT Image. Pick one, paste your key, done.'),
             field('Profile', h('div.iig-stack', {}, profileSel, profileRow), 'Save complete provider setups and switch with one tap.'),
             field('API type', providerSel, provider.hint),
-            field('Endpoint URL', text('endpoint', { type: 'url', placeholder: provider.defaultEndpoint || 'https://…', inputmode: 'url' }), 'Base URL only. Include any documented prefix such as /v1 or /compatible.'),
+            field('Endpoint URL', text('endpoint', { type: 'url', placeholder: provider.defaultEndpoint || 'https://…', inputmode: 'url', onAfter: () => { forgetModels(); if (autoProvider()) render(); } }), 'Base URL, as your provider documents it (with or without /v1).'),
             field('API key', h('div.iig-input-group', {}, key, eye), 'Stored in SillyTavern\'s settings.json and masked in logs.'),
             provider.supportsModels || provider.id !== 'naistera'
                 ? field('Model', h('div.iig-stack', {}, modelBtn.el, capsLine), 'Tap to see the models your key can use, with what each one supports.')

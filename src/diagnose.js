@@ -7,7 +7,7 @@
 import { VERSION } from './constants.js';
 import { generate, hintFor } from './engine.js';
 import { bestModel, modelCaps } from './models.js';
-import { listModels, resolveId } from './model-list.js';
+import { autoProvider, listModels, resolveId } from './model-list.js';
 import { normalizeBase, getProvider } from './providers.js';
 import { save, settings } from './settings.js';
 import { IS_IOS, ctx, redact } from './st.js';
@@ -55,6 +55,8 @@ function explainHttp(e, s, provider) {
  * @returns {Promise<Array<{id, label, status:'run'|'ok'|'warn'|'fail'|'skip', detail?, fix?, action?}>>}
  */
 export async function runDiagnostics({ testImage = false, onStep = () => {} } = {}) {
+    const fromProvider = getProvider(settings().provider).label;
+    const switched = autoProvider({ quiet: true });
     const s = settings();
     const provider = getProvider(s.provider);
     const steps = [];
@@ -81,7 +83,7 @@ export async function runDiagnostics({ testImage = false, onStep = () => {} } = 
         done({ status: 'fail', detail: problems.join(' '), fix: 'Fix these in Settings → Connection.' });
         blocked = !s.enabled || (provider.keyRequired && !s.apiKey);
     } else {
-        done({ status: 'ok', detail: `${provider.label} · ${normalizeBase(s.endpoint) || provider.defaultEndpoint} · ${s.model || '(no model)'}` });
+        done({ status: 'ok', detail: `${switched ? `Switched from ${fromProvider} to ${provider.label}: this endpoint has its own image API. ` : ''}${provider.label} · ${normalizeBase(s.endpoint) || provider.defaultEndpoint} · ${s.model || '(no model)'}` });
     }
 
     // 2. Reach the provider + key accepted

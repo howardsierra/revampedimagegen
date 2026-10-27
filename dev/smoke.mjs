@@ -306,6 +306,17 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         await page.keyboard.press('Escape');
         await page.waitForTimeout(250);
 
+        // NanoGPT: the chat-list id "gemini-3-pro-image-preview" is rejected by its image API;
+        // the provider lists real image ids (with names) and maps Nano Banana Pro across.
+        await page.evaluate(() => {
+            const s = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            Object.assign(s, { provider: 'nanogpt', endpoint: `${location.origin}/mocknano/api/v1`, model: 'gemini-3-pro-image-preview', apiKey: 'test-key' });
+        });
+        const nano = await page.evaluate(() => window.RevampedImageGen.generate('Elodie on a balcony', { aspect_ratio: '16:9', image_size: 'auto' }).then(r => ({ ok: !!r?.src }), e => ({ err: e.message })));
+        const n = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(nano.ok && n.url === '/mocknano/api/v1/images/generations' && n.model === 'nano-banana-pro', `NanoGPT: mapped to its own Nano Banana Pro id and generated (${nano.err || n.model})`);
+        check(n.imageDataUrl === 1 && /^\d+x\d+$/.test(n.size) && n.response_format === 'b64_json', `NanoGPT: reference sent as imageDataUrl, size ${n.size}`);
+
         // Layers: a chat-layer ref exists only in its chat; muting hides an inherited one.
         await page.locator('.iig-tab[data-tab="refs"]').click();
         await page.locator('#iig-tab-refs .iig-chip', { hasText: 'This chat' }).click();

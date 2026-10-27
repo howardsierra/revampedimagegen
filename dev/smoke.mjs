@@ -376,6 +376,54 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         check((await page.locator('.iig-capture-hit').count()) === 1, 'tester shows captures for an enabled rule');
         await page.locator('.iig-capture-hit').scrollIntoViewIfNeeded();
         await shot('9-settings-capture');
+
+        // Example prompts: a starting look feeds the injected instructions.
+        await page.evaluate(() => {
+            const s = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            Object.assign(s, { provider: 'openai', endpoint: `${location.origin}/mock`, model: 'mock-image-1', apiKey: 'test-key' });
+        });
+        await page.locator('details.iig-section summary', { hasText: 'Prompt capture' }).click();
+        await page.locator('details.iig-section summary', { hasText: 'Example prompts' }).click();
+        const addExample = async (text) => {
+            await page.locator('.iig-add-example').click();
+            await page.locator('.iig-example-row:last-child textarea').fill(text);
+            await page.waitForTimeout(400);
+        };
+        await addExample('Spontaneous nighttime storefront selfie of Elodie, shot on an iPhone front camera, neon sign glow, grainy, candid.');
+        await addExample('Candid phone photo of Axel laughing in a diner booth, warm tungsten light, tilted framing.');
+        check((await page.locator('.iig-example-row').count()) === 2, 'own examples can be added and edited');
+        const inj = await page.evaluate(() => window.harness.prompts.revamped_image_gen?.v || '');
+        check(/Example 1: Spontaneous nighttime storefront selfie/.test(inj) && /Example 2: Candid phone photo/.test(inj) && !/\{\{iig_examples\}\}/.test(inj), 'examples are injected into the chat model instructions');
+        await page.locator('.iig-example-row').first().scrollIntoViewIfNeeded();
+        await shot('12-example-prompts');
+        await page.locator('.iig-section', { hasText: 'Example prompts' }).locator('.iig-chip', { hasText: 'This character' }).click();
+        check((await page.locator('.iig-example-row').count()) === 0, 'this character starts with its own empty list');
+        await addExample('Anime illustration of Elodie leaning out of a train window, cherry blossoms, cel shading.');
+        const inj2 = await page.evaluate(() => window.harness.prompts.revamped_image_gen?.v || '');
+        check(/Anime illustration/.test(inj2) && !/storefront selfie/.test(inj2), 'a character\'s own examples replace the global ones');
+        await page.evaluate(() => window.RevampedImageGen.close());
+        await page.waitForTimeout(300);
+
+        // Early start: the image request goes out while the reply is still streaming.
+        const streamText = 'Elodie spins around, laughing.\n\n<img data-iig-instruction=\'{"prompt":"Elodie twirling under string lights, candid phone photo","aspect_ratio":"3:4"}\' src="[IMG:GEN]">\n\nThe music swells and the whole square starts to dance with them, lanterns swaying overhead while the band plays on into the night.';
+        const streamedId = await page.evaluate((t) => window.harness.streamAiMessage(t, { steps: 10, tokenDelay: 200 }), streamText);
+        const sent = await page.evaluate(async () => (await (await fetch('/mock/_last')).json()));
+        const ended = await page.evaluate(() => window.__streamEndedAt);
+        const lead = ended - sent.at;
+        check(sent.prompt?.includes('twirling') && lead > 500, `early start: image request sent ${lead} ms before the reply finished streaming`);
+        await page.waitForFunction((i) => [...document.querySelectorAll(`#chat .mes[mesid="${i}"] img.iig-img`)].some(im => !/\[IMG/.test(im.getAttribute('src'))), streamedId, { timeout: 12000 });
+        const finalMes = await page.evaluate((i) => window.harness.chat[i].mes, streamedId);
+        check(!finalMes.includes('[IMG:GEN]') && (finalMes.match(/data-iig-instruction/g) || []).length === 1, 'early-started image lands in the finished message (once)');
+
+        // Auto-illustrate: a reply without an image gets one, written from the scene + examples.
+        await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.autoIllustrate = 1; });
+        const autoId = await page.evaluate(() => window.harness.streamAiMessage('Elodie leans on the railing and watches the storm roll in over the sea.', { steps: 3, tokenDelay: 50 }));
+        await page.waitForFunction((i) => window.harness.chat[i].mes.includes('data-iig-instruction'), autoId, { timeout: 8000 });
+        const quietPrompt = await page.evaluate(() => window.__lastQuiet || '');
+        check(/Scene so far:/.test(quietPrompt) && /twirling|dance/.test(quietPrompt) && /Anime illustration/.test(quietPrompt), 'auto-illustrate writes the prompt from recent messages and the examples');
+        await page.waitForFunction((i) => [...document.querySelectorAll(`#chat .mes[mesid="${i}"] img.iig-img`)].some(im => !/\[IMG/.test(im.getAttribute('src'))), autoId, { timeout: 12000 });
+        check(true, 'auto-illustrate generated an image for a reply without one');
+        await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.autoIllustrate = 0; });
     }
 
     check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);

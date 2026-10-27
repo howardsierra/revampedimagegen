@@ -22,6 +22,8 @@ const event_types = {
     USER_MESSAGE_RENDERED: 'user_message_rendered', MESSAGE_UPDATED: 'message_updated', MESSAGE_EDITED: 'message_edited',
     MESSAGE_SWIPED: 'message_swiped', MORE_MESSAGES_LOADED: 'more_messages_loaded',
     CHAT_COMPLETION_PROMPT_READY: 'chat_completion_prompt_ready', GENERATE_AFTER_COMBINE_PROMPTS: 'generate_after_combine_prompts',
+    GENERATION_STARTED: 'generation_started', GENERATION_ENDED: 'generation_ended', GENERATION_STOPPED: 'generation_stopped',
+    STREAM_TOKEN_RECEIVED: 'stream_token_received',
 };
 
 const origin = location.origin;
@@ -70,7 +72,7 @@ window.SillyTavern = {
         saveMetadata: async () => {},
         updateMessageBlock: (i) => renderMessage(i),
         setExtensionPrompt: (k, v, pos, depth) => { prompts[k] = { v, pos, depth }; },
-        generateQuietPrompt: async () => 'Prompt: "Elodie leaning on the lighthouse railing at night, storm clouds, lantern glow, cinematic wide shot"',
+        generateQuietPrompt: async (o) => { window.__lastQuiet = typeof o === 'object' ? o.quietPrompt : o; return 'Prompt: "Elodie leaning on the lighthouse railing at night, storm clouds, lantern glow, cinematic wide shot"'; },
     }),
 };
 
@@ -80,6 +82,24 @@ window.harness = {
         chat.push({ name: 'Elodie', is_user: false, mes: text, swipes: [text], swipe_id: 0 });
         renderMessage(chat.length - 1);
         await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, chat.length - 1);
+    },
+    /** Stream a reply the way ST does: tokens first, then GENERATION_ENDED, then the render event. */
+    async streamAiMessage(text, { steps = 8, tokenDelay = 120 } = {}) {
+        await eventSource.emit(event_types.GENERATION_STARTED, 'normal', {}, false);
+        chat.push({ name: 'Elodie', is_user: false, mes: '', swipes: [''], swipe_id: 0 });
+        const i = chat.length - 1;
+        for (let k = 1; k <= steps; k++) {
+            const part = text.slice(0, Math.ceil(text.length * k / steps));
+            chat[i].mes = part;
+            chat[i].swipes[0] = part;
+            renderMessage(i);
+            await eventSource.emit(event_types.STREAM_TOKEN_RECEIVED, part);
+            await new Promise(r => setTimeout(r, tokenDelay));
+        }
+        window.__streamEndedAt = Date.now();
+        await eventSource.emit(event_types.GENERATION_ENDED, chat.length);
+        await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, i);
+        return i;
     },
     async switchChat(id) {
         chatId = id;

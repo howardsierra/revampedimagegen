@@ -35,14 +35,27 @@ export const DEFAULT_STYLES = Object.freeze([
     { name: 'Photo', value: 'photorealistic, natural light, 50mm photograph' },
 ]);
 
-export const DEFAULT_INJECT_TEMPLATE = `[Image generation is available.]
+// Earlier default templates, upgraded in place when the user never edited them.
+export const OLD_INJECT_TEMPLATES = [`[Image generation is available.]
 When a moment in the scene is worth showing, request an image in your reply, at most {{iig_max}} per reply.
 {{iig_format}}
 - PROMPT: a detailed English description (60+ words) of subject, pose, expression, setting, lighting, mood and camera framing.
-- Always refer to characters by FIRST NAME inside PROMPT so reference photos can be matched. Known characters with references: {{iig_names}}.`;
+- Always refer to characters by FIRST NAME inside PROMPT so reference photos can be matched. Known characters with references: {{iig_names}}.`];
 
-export const SCENE_PROMPT_TEMPLATE = `[Pause the roleplay. Write ONE image-generation prompt that illustrates the scene below. Output only the prompt — no preamble, no quotes, no markdown.
-Requirements: English, 60–120 words; describe subject, appearance, pose, expression, setting, lighting, mood and camera framing; refer to characters by their first name ({{iig_names}}).]
+export const DEFAULT_INJECT_TEMPLATE = `[Image generation is available.]
+When a moment in the scene is worth showing, request an image in your reply, at most {{iig_max}} per reply.
+{{iig_format}}
+- PROMPT: a detailed English description (60+ words) of subject, pose, expression, setting, lighting, mood and camera framing, matching what is happening right now in the story.
+- Always refer to characters by FIRST NAME inside PROMPT so reference photos can be matched. Known characters with references: {{iig_names}}.
+{{iig_examples}}`;
 
-Scene:
+export const SCENE_PROMPT_TEMPLATE = `[Pause the roleplay. Write ONE image-generation prompt that illustrates the latest moment of the scene below. Output only the prompt — no preamble, no quotes, no markdown.
+Requirements: English, 60–120 words; describe subject, appearance, pose, expression, setting, lighting, mood and camera framing; refer to characters by their first name ({{iig_names}}).
+{{iig_examples}}]
+
+Scene so far:
+{{iig_context}}
+
+Moment to illustrate:
 {{iig_scene}}`;
+

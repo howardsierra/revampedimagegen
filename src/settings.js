@@ -3,7 +3,7 @@
  * Licensed under AGPL-3.0-or-later.
  */
 
-import { MODULE, LEGACY_MODULE, DEFAULT_STYLES, DEFAULT_INJECT_TEMPLATE } from './constants.js';
+import { MODULE, LEGACY_MODULE, DEFAULT_STYLES, DEFAULT_INJECT_TEMPLATE, OLD_INJECT_TEMPLATES } from './constants.js';
 import { defaultRules, BUILTIN_RULES } from './capture.js';
 import { ctx, log, setSecretsToMask, uid } from './st.js';
 
@@ -62,6 +62,16 @@ export const DEFAULTS = Object.freeze({
     compactHistory: false,
     injectFormat: 'html',           // html | id of a capture rule the AI is told to use
 
+    // Example prompts: teach the chat model the look and detail of prompts to write.
+    promptExamples: [],             // [{ id, text, enabled }] — every chat
+    charExamples: {},               // characterKey -> [{ id, text, enabled }] — replaces the global list for that card
+    examplesMax: 3,
+    sceneContext: 4,                // messages of context when the extension writes a prompt itself
+
+    // Inline generation
+    earlyStart: true,               // start images as soon as a tag is complete, while the reply still streams
+    autoIllustrate: 0,              // 0 = off; N = illustrate every Nth AI reply that has no image
+
     // Regex prompt capture: turn other formats in AI replies into image tags.
     captureRules: defaultRules(),
 
@@ -109,6 +119,8 @@ export function settings() {
         if (!Array.isArray(s.captureRules)) s.captureRules = defaultRules();
         // v1.2: resolution became model-driven by default.
         if (!s._autoSizeMigrated) { s.imageSize = 'auto'; s._autoSizeMigrated = true; }
+        // Unedited old default templates gain {{iig_examples}}.
+        if (OLD_INJECT_TEMPLATES.includes(s.injectTemplate)) s.injectTemplate = DEFAULT_INJECT_TEMPLATE;
         // Add built-in rules introduced after the user's settings were created.
         for (const b of BUILTIN_RULES) {
             if (!s.captureRules.some(r => r.id === b.id)) s.captureRules.push({ id: b.id, name: b.name, pattern: b.pattern, flags: b.flags, enabled: false, builtin: true, kind: 'image' });
@@ -220,6 +232,32 @@ function normalizeRefSet(set) {
     set.npcs = Array.isArray(set.npcs) ? set.npcs.map(n => ({ id: n.id || uid('npc'), ...normalizeSlot(n) })) : [];
     if (!Array.isArray(set.muted)) set.muted = [];
     return set;
+}
+
+/** Example prompts for the open character (created on demand). */
+export function characterExamples({ create = false } = {}) {
+    const s = settings();
+    const key = characterKey();
+    if (!key) return null;
+    if (!s.charExamples || typeof s.charExamples !== 'object') s.charExamples = {};
+    if (!Array.isArray(s.charExamples[key]) && create) s.charExamples[key] = [];
+    return Array.isArray(s.charExamples[key]) ? s.charExamples[key] : null;
+}
+
+/**
+ * Add a prompt as an example: to the open character's list when it has one,
+ * else to the "every chat" list. Returns where it went, or null if already there.
+ */
+export function addExample(text) {
+    const t = String(text || '').trim();
+    if (!t) return null;
+    const own = characterExamples();
+    const useChar = !!own?.length;
+    const list = useChar ? own : settings().promptExamples;
+    if (list.some(x => x.text.trim() === t)) return null;
+    list.push({ id: uid('ex'), text: t, enabled: true });
+    save(useChar ? 'charExamples' : 'promptExamples');
+    return useChar ? 'character' : 'global';
 }
 
 /** Key for the character layer: the card's avatar file, or the group id. */

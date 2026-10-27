@@ -262,7 +262,7 @@ function notifyDone(job, path) {
  * mode 'regen' — tag already has an image: on failure the old image is kept.
  * `dataOverride` replaces the instruction (Edit & regenerate).
  */
-export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {}) {
+export function queueTag(mesId, tag, { mode = 'new', dataOverride = null, early = false } = {}) {
     const forChat = chatId();
     const key = `${forChat}|${mesId}|${tag.fullMatch}`;
     const existing = inflight.get(key);
@@ -272,6 +272,8 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
     }
     const data = dataOverride ? { ...tag.data, ...dataOverride } : tag.data;
     let find = tag.fullMatch;
+    // Started mid-stream: ST rewrites the message on every token, so wait for the final text before editing it.
+    const streamDone = early ? streams.get(Number(mesId))?.done : null;
 
     const job = queue.enqueue({
         kind: tag.kind,
@@ -280,6 +282,7 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
     }, async (j, signal, setStatus) => {
         try {
             const res = await generate(tag.kind, data, { signal, setStatus });
+            if (streamDone) { setStatus('Waiting for the reply to finish…'); await streamDone; }
             let next = withSrc({ ...tag, fullMatch: find }, res.path);
             if (dataOverride) next = withData(parseTags(next)[0] || { ...tag, fullMatch: next }, data);
             const { mesId: where } = await applyEdit(forChat, mesId, find, next);
@@ -288,6 +291,7 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
             notifyDone(j, res.path);
             return { ...res, mesId: where };
         } catch (e) {
+            if (streamDone) await streamDone;
             const cancelled = isAbort(e);
             if (mode === 'regen') {
                 // Never destroy a good image: put the original back.
@@ -317,8 +321,84 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
         }
     });
     inflight.set(key, job.id);
-    attach(mesId, tag, job);
+    if (!early) attach(mesId, tag, job);
     return job;
+}
+
+// ---------------------------------------------------------------- streaming
+//
+// Images start as soon as their tag is complete in the streamed text, instead
+// of after the whole reply. The placeholder appears when the reply renders.
+
+const streams = new Map(); // mesId -> { done: Promise, resolve }
+let generating = null; // { type, at } while ST writes a normal reply
+let lastReplyAt = 0;
+
+function settleStream(mesId) {
+    const st = streams.get(Number(mesId));
+    if (!st) return;
+    streams.delete(Number(mesId));
+    st.resolve();
+}
+
+export function onGenerationStarted(type, opts, dryRun) {
+    // Quiet prompts (ours included) and impersonation don't write a chat reply.
+    generating = dryRun || opts?.quiet_prompt || ['quiet', 'impersonate'].includes(type) ? null : { type, at: Date.now() };
+    if (generating) lastReplyAt = Date.now();
+}
+
+export function onGenerationEnded() {
+    generating = null;
+    // Normally the render event settles streams; this covers stops and odd paths.
+    for (const id of [...streams.keys()]) setTimeout(() => settleStream(id), 2000);
+}
+
+const TAG_HINT = /data-iig-(instruction|video)|\[(IMG|VID):GEN/;
+
+export function onStreamToken(text) {
+    const s = settings();
+    if (!s.enabled || !s.autoGenerate || !s.earlyStart || !generating) return;
+    const str = String(text || '');
+    if (!TAG_HINT.test(str)) return;
+    const chat = ctx().chat || [];
+    const mesId = chat.length - 1;
+    const msg = chat[mesId];
+    if (!msg || msg.is_user || msg.is_system) return;
+    const forChat = chatId();
+    for (const tag of parseTags(str).filter(t => t.state === 'pending')) {
+        if (inflight.has(`${forChat}|${mesId}|${tag.fullMatch}`)) continue;
+        if (!streams.has(mesId)) {
+            let resolve;
+            const done = new Promise(r => { resolve = r; });
+            streams.set(mesId, { done, resolve });
+        }
+        log('info', `Message ${mesId}: starting an image while the reply streams`);
+        queueTag(mesId, tag, { early: true });
+    }
+}
+
+/**
+ * Auto-illustrate: after every Nth AI reply in a row without an image, have
+ * the chat model write a prompt for it. Only for replies that were just
+ * generated (not old messages being re-rendered).
+ */
+function maybeAutoIllustrate(mesId) {
+    const s = settings();
+    const every = Number(s.autoIllustrate) || 0;
+    if (every <= 0 || !s.autoGenerate || Date.now() - lastReplyAt > 10 * 60 * 1000) return;
+    const chat = ctx().chat || [];
+    if (Number(mesId) !== chat.length - 1) return;
+    let run = 0;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (m.is_system) continue;
+        if (m.is_user) continue;
+        if (parseTags(m.mes).length) break;
+        run++;
+    }
+    if (run < every) return;
+    lastReplyAt = 0; // once per reply
+    illustrateMessage(Number(mesId)).catch(e => toast.error(`Auto-illustrate: ${e.message}`));
 }
 
 /**
@@ -348,11 +428,13 @@ export function processMessage(mesId, { force = false } = {}) {
     if (!s.enabled) return [];
     const msg = ctx().chat?.[mesId];
     if (!msg || msg.is_system) return [];
+    settleStream(mesId);
     if (!msg.is_user) captureMessage(mesId);
     const pending = parseTags(msg.mes).filter(t => t.state === 'pending');
     reattach(mesId);
     if (!pending.length || (!s.autoGenerate && !force)) {
         decorateMessage(mesId);
+        if (!pending.length && !msg.is_user && !force) maybeAutoIllustrate(mesId);
         return [];
     }
     // "Tap to generate" cards replaced the pending <img>s; restore them so placeholders land in place.
@@ -481,10 +563,25 @@ export async function illustrateMessage(mesId) {
     const s = settings();
     const id = mesId ?? lastMessageId();
     if (id == null) throw new Error('No message to illustrate');
-    toast.info('Writing a prompt for this scene…');
-    const prompt = await describeScene(id);
+    const forChat = chatId();
+    // Shown in the message while the chat model writes the prompt.
+    const writing = h('div.iig-ph.iig-ph-writing', { role: 'status', 'aria-live': 'polite', style: { aspectRatio: String(s.aspectRatio || '1:1').replace(':', ' / ') } },
+        h('div.iig-ph-shimmer'),
+        h('div.iig-ph-body', {},
+            h('div.iig-ph-icon', {}, h('span.iig-ph-ring', { 'aria-hidden': 'true' }), icon('feather')),
+            h('div.iig-ph-status', {}, 'Writing a prompt for this scene…'),
+        ));
+    mesTextEl(id)?.append(writing);
+    let prompt;
+    try {
+        prompt = await describeScene(id);
+    } finally {
+        writing.remove();
+    }
+    if (forChat !== chatId()) throw new Error('The chat changed while the prompt was being written.');
     const c = ctx();
     const msg = c.chat[id];
+    if (!msg) throw new Error('That message is gone.');
     const data = { prompt, aspect_ratio: s.aspectRatio };
     if (s.imageSize && s.imageSize !== 'auto') data.image_size = s.imageSize;
     if (s.defaultStyle) data.style = s.defaultStyle;

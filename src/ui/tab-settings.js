@@ -11,8 +11,8 @@ import { openDiagnostics } from './diagnose-ui.js';
 import { PROVIDERS, getProvider, normalizeNaisteraModel } from '../providers.js';
 import { renderInjection, updateInjection } from '../prompt.js';
 import { clearRefCache } from '../refs.js';
-import { applyProfile, importLegacy, legacySettings, onSettingsChange, save, settings, snapshotProfile, updateActiveProfile } from '../settings.js';
-import { logsAsText, onLog, toast, uid } from '../st.js';
+import { applyProfile, characterExamples, characterKey, importLegacy, legacySettings, onSettingsChange, save, settings, snapshotProfile, updateActiveProfile } from '../settings.js';
+import { getCharName, logsAsText, onLog, toast, uid } from '../st.js';
 import { chipSelect, copyText, debounce, field, h, icon, section, setChildren, toggle } from './dom.js';
 import { confirmDialog } from './editor.js';
 import { ratioChip, sizeChips } from './widgets.js';
@@ -266,7 +266,7 @@ export function createSettingsTab() {
                 field('Insert depth', text('injectDepth', { type: 'number', min: 0, max: 50, onAfter: () => updateInjection() }), '0 = after the last message'),
                 field('Max images per reply', text('injectMax', { type: 'number', min: 1, max: 6, onAfter: refreshPreview })),
             ),
-            field('Template', tpl, '{{iig_names}} → names with reference photos, {{iig_max}} → the limit above. ST macros like {{char}} work too.'),
+            field('Template', tpl, '{{iig_names}} → names with reference photos, {{iig_max}} → the limit above, {{iig_examples}} → your example prompts. ST macros like {{char}} work too.'),
             h('div.iig-row.wrap', {},
                 h('button.iig-btn.small', { type: 'button', onclick: () => { preview.hidden = !preview.hidden; refreshPreview(); } }, icon('eye'), h('span', {}, 'Preview')),
                 h('button.iig-btn.small.ghost', { type: 'button', onclick: () => { settings().injectTemplate = DEFAULT_INJECT_TEMPLATE; tpl.value = DEFAULT_INJECT_TEMPLATE; save('injectTemplate'); refreshPreview(); } }, icon('rotate-left'), h('span', {}, 'Reset')),
@@ -291,6 +291,60 @@ export function createSettingsTab() {
             })(), 'Simple formats are more reliable with smaller models and use fewer tokens. They are converted by Prompt capture below.'),
             flag('compactHistory', 'Shorten old image tags in the prompt', 'Replaces finished tags with a one-line note. Saves tokens; stops the model copying file paths.'),
         ], { iconName: 'robot' });
+    }
+
+    // ------------------------------------------------------------ example prompts
+
+    function examplesSection() {
+        let scope = characterExamples()?.length ? 'character' : 'global';
+        const listEl = h('div.iig-examples');
+        const scopeHint = h('p.iig-muted.small');
+        const listFor = (create = false) => (scope === 'character' ? characterExamples({ create }) : settings().promptExamples);
+        const changed = () => save(scope === 'character' ? 'charExamples' : 'promptExamples');
+
+        function draw() {
+            const hasChar = !!characterKey();
+            if (scope === 'character' && !hasChar) scope = 'global';
+            scopeChips.set(scope);
+            scopeChips.el.querySelector('[data-value="character"]').disabled = !hasChar;
+            const list = listFor() || [];
+            scopeHint.textContent = scope === 'character'
+                ? `Only for ${getCharName() || 'this character'}. When this list has examples, it replaces the "Every chat" list for this card.`
+                : (characterExamples()?.some(x => x.enabled !== false) ? 'Used in every chat — except this character, which has its own list.' : 'Used in every chat unless a character has its own list.');
+            setChildren(listEl, list.length ? list.map((ex, i) => {
+                const fit = () => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
+                const save1 = debounce(() => { ex.text = t.value; changed(); }, 300);
+                const t = h('textarea.iig-input', { rows: 3, value: ex.text, 'aria-label': `Example ${i + 1}`, oninput: () => { fit(); save1(); } });
+                requestAnimationFrame(fit);
+                const on = h('input', { type: 'checkbox', checked: ex.enabled !== false, 'aria-label': 'Use this example', onchange: () => { ex.enabled = on.checked; changed(); } });
+                return h('div.iig-example-row', {}, h('label.iig-example-on', { title: 'Use this example' }, on), t,
+                    h('button.iig-icon-btn', { type: 'button', 'aria-label': 'Delete example', onclick: () => { list.splice(i, 1); changed(); draw(); } }, icon('trash')));
+            }) : h('div.iig-empty.small', {}, h('p', {}, 'No examples yet. Tap "Add example" and paste a prompt written the way you like. A prompt that already gave you a great image is the best example.')));
+        }
+
+        const scopeChips = chipSelect([
+            { value: 'global', label: 'Every chat' },
+            { value: 'character', label: 'This character' },
+        ], scope, (v) => { scope = v; draw(); });
+
+        draw();
+        const sec = section('Example prompts', [
+            h('p.iig-muted.small', {}, 'Show the chat model what a good image prompt looks like for your story — the look, the structure, the detail. It writes new prompts for what is happening in the roleplay in the same style. Used for image tags in replies, Illustrate and Auto-illustrate.'),
+            scopeChips.el,
+            scopeHint,
+            listEl,
+            h('div.iig-row.wrap', {},
+                h('button.iig-btn.small.iig-add-example', { type: 'button', onclick: () => { const l = listFor(true); if (!l) return; l.push({ id: uid('ex'), text: '', enabled: true }); changed(); draw(); listEl.querySelector('.iig-example-row:last-child textarea')?.focus(); } }, icon('plus'), h('span', {}, 'Add example')),
+            ),
+            h('p.iig-muted.small', {}, 'Tip: in the image viewer, tap ⓘ → "Save as example" to add the prompt of any image you liked. Two or three varied examples work best; write them with your own characters\' names.'),
+            h('div.iig-row-2', {},
+                field('Examples sent', text('examplesMax', { type: 'number', min: 0, max: 8 }), 'Per request; more costs more tokens.'),
+                field('Context messages', text('sceneContext', { type: 'number', min: 0, max: 12 }), 'Earlier messages read when the extension writes a prompt itself.'),
+            ),
+        ], { iconName: 'feather' });
+        // Boxes measured while the section was closed have no height yet.
+        sec.addEventListener('toggle', () => { if (sec.open) for (const t of listEl.querySelectorAll('textarea')) { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; } });
+        return sec;
     }
 
     // ------------------------------------------------------------ prompt capture (regex)
@@ -372,6 +426,14 @@ export function createSettingsTab() {
     function behaviourSection() {
         return section('Behaviour', [
             flag('autoGenerate', 'Generate automatically', 'Off: tags in AI replies show a "Tap to generate" button instead'),
+            flag('earlyStart', 'Start images while the reply streams', 'Each image starts as soon as its tag is written, instead of after the whole reply'),
+            field('Auto-illustrate', select('autoIllustrate', [
+                { value: '0', label: 'Off' },
+                { value: '1', label: 'Every reply without an image' },
+                { value: '2', label: 'Every 2nd reply without an image' },
+                { value: '3', label: 'Every 3rd reply without an image' },
+                { value: '5', label: 'Every 5th reply without an image' },
+            ]), 'When the chat model did not ask for an image, the extension writes a prompt for the scene itself (one extra background request) and generates it.'),
             h('div.iig-row-3', {},
                 field('Parallel jobs', text('concurrency', { type: 'number', min: 1, max: 6 })),
                 field('Retries', text('maxRetries', { type: 'number', min: 0, max: 6 })),
@@ -470,6 +532,7 @@ export function createSettingsTab() {
             defaultsSection(),
             stylesSection(),
             instructionsSection(),
+            examplesSection(),
             captureSection(),
             videoSection(),
             behaviourSection(),

@@ -90,6 +90,22 @@ The AI doesn't have to write HTML. Under **Settings → Prompt capture**, enable
 - A tester shows live what each enabled rule captures from a sample reply.
 - **AI instructions → Tell the AI to write** switches the injected instructions to the format you chose. Simple formats are more reliable with smaller models and cost fewer tokens.
 
+## Example prompts: teach the chat model your style
+
+Under **Settings → Example prompts**, add a few prompts written the way you like them: your look, your structure, your level of detail. The chat model then writes new prompts for whatever is happening in the roleplay in that same style. It never copies the examples, and they're never sent to the image model.
+
+- **Every chat** or **This character**. A character with its own list uses only that list, so an anime card and a photoreal card can each keep their own look.
+- In the image viewer, **ⓘ → Save as example** adds the prompt of any image you liked. That's the quickest way to build a good list.
+- Examples are used in three places: image tags the chat model writes in replies (through `{{iig_examples}}` in the AI instructions), **Illustrate**, and **Auto-illustrate**.
+- **Examples sent** caps how many go into each request. 2–3 varied examples work best.
+
+## Inline generation
+
+- **Starts while the reply streams.** Each image starts as soon as its tag is complete, not after the whole reply. While the reply streams, the tag shows as a soft pulsing card instead of a broken image.
+- **Auto-illustrate** (Settings → Behaviour). If the chat model didn't ask for an image, the extension writes a prompt for the scene itself and generates it, on every reply or every 2nd, 3rd or 5th reply. This uses one extra background request to the chat model.
+- **Scene-aware prompts.** Illustrate and Auto-illustrate read the last few messages (**Context messages**), not just the one being illustrated. That way they know where everyone is and what they're wearing.
+- While the prompt is being written, a "Writing a prompt for this scene…" card shows in the message.
+
 ## What's new compared to notsosillynotsoimages
 
 **The panel**

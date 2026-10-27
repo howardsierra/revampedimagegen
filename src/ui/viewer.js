@@ -7,6 +7,7 @@
 
 import { copyText, h, icon, setChildren } from './dom.js';
 import { toast } from '../st.js';
+import { addExample } from '../settings.js';
 
 let el;
 let stage;
@@ -225,7 +226,17 @@ function renderInfo(item) {
     ].filter(([, v]) => v);
     setChildren(infoBox, 
         ...rows.map(([k, v]) => h('div.iig-info-row', {}, h('span.k', {}, k), h('span.v', {}, String(v)))),
-        h('button.iig-btn.small', { type: 'button', onclick: async () => { if (await copyText(item.prompt || d.prompt || '')) toast.success('Prompt copied'); } }, icon('copy'), ' Copy prompt'),
+        h('div.iig-row.wrap', {},
+            h('button.iig-btn.small', { type: 'button', onclick: async () => { if (await copyText(item.prompt || d.prompt || '')) toast.success('Prompt copied'); } }, icon('copy'), ' Copy prompt'),
+            h('button.iig-btn.small', {
+                type: 'button', title: 'Teach the chat model to write prompts like this one',
+                onclick: () => {
+                    const where = addExample(item.prompt || d.prompt);
+                    if (!where) toast.info('Already one of your example prompts');
+                    else toast.success(where === 'character' ? 'Saved as an example for this character' : 'Saved as an example prompt');
+                },
+            }, icon('feather'), ' Save as example'),
+        ),
     );
 }
 

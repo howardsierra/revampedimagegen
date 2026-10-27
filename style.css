@@ -1979,3 +1979,51 @@ body.iig-panel-open .iig-fab { opacity: 0; pointer-events: none; transform: scal
         transition-duration: 0.01ms !important;
     }
 }
+
+/* While a reply streams, its not-yet-generated image tags render as broken
+   <img>s. Show them as a soft pulsing card instead (the real placeholder
+   takes over when the reply finishes). */
+.mes_text img[src^="[IMG:"],
+.mes_text img[src^="[VID:"] {
+    --iig-fg: var(--SmartThemeBodyColor, #dcdcd2);
+    --iig-accent: var(--SmartThemeQuoteColor, #e3a14b);
+    display: block;
+    width: min(100%, 512px);
+    aspect-ratio: 1 / 1;
+    max-height: 50vh;
+    margin: 10px 0;
+    border-radius: 18px;
+    border: 1px solid color-mix(in srgb, var(--iig-fg) 10%, transparent);
+    /* Replace the broken-image icon with a transparent pixel so the background shows. */
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E");
+    color: transparent;
+    background:
+        radial-gradient(120% 90% at 15% 0%, color-mix(in srgb, var(--iig-accent) 22%, transparent), transparent 60%),
+        color-mix(in srgb, var(--iig-fg) 5%, rgba(0, 0, 0, 0.25));
+    animation: iig-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes iig-pulse {
+    50% { opacity: 0.55; }
+}
+
+.iig-ph-writing .iig-ph-status { opacity: 0.9; }
+
+@media (prefers-reduced-motion: reduce) {
+    .mes_text img[src^="[IMG:"],
+    .mes_text img[src^="[VID:"] { animation: none; }
+}
+
+/* Example prompts */
+.iig-examples { display: flex; flex-direction: column; gap: 8px; }
+.iig-example-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+}
+.iig-example-row textarea { min-height: 4.5em; resize: vertical; }
+.iig-example-on { display: grid; place-items: center; min-width: 32px; min-height: 40px; cursor: pointer; }
+.iig-example-on input { width: 18px; height: 18px; accent-color: var(--iig-accent, var(--SmartThemeQuoteColor)); }
+.iig-empty.small { padding: 10px 12px; text-align: left; }
+.iig-empty.small p { margin: 0; }

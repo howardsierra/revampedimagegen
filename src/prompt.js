@@ -6,7 +6,8 @@
 
 import { MODULE, SCENE_PROMPT_TEMPLATE } from './constants.js';
 import { knownRefNames } from './refs.js';
-import { settings } from './settings.js';
+import { characterExamples, settings } from './settings.js';
+import { formatExamples, pickExamples } from './examples.js';
 import { ctx, getCharName, getUserName, log } from './st.js';
 import { formatInstructions } from './capture.js';
 import { compactTags, parseTags, plainText } from './tags.js';
@@ -20,12 +21,21 @@ function namesList() {
     return names.length ? names.join(', ') : 'none yet';
 }
 
+/** The example prompts that apply in this chat (character list, else global). */
+export function activeExamples() {
+    const s = settings();
+    return pickExamples({ global: s.promptExamples, character: characterExamples() || [], max: s.examplesMax ?? 3 });
+}
+
 export function renderInjection() {
     const s = settings();
     return String(s.injectTemplate || '')
+        .replaceAll('{{iig_examples}}', formatExamples(activeExamples()))
         .replaceAll('{{iig_format}}', formatInstructions(s.injectFormat, s.captureRules))
         .replaceAll('{{iig_names}}', namesList())
-        .replaceAll('{{iig_max}}', String(Math.max(1, Number(s.injectMax) || 1)));
+        .replaceAll('{{iig_max}}', String(Math.max(1, Number(s.injectMax) || 1)))
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 /** Push (or clear) our instruction block into the next prompt. */
@@ -94,10 +104,20 @@ export async function describeScene(mesId = null) {
     }
     const msg = chat[idx];
     if (!msg) throw new Error('No message to illustrate.');
-    const scene = plainText(msg.mes).slice(-3000);
+    const scene = plainText(compactTags(msg.mes)).slice(-3000);
+    // A few earlier messages, so the prompt knows where everyone is and what they wear.
+    const n = Math.max(0, Math.min(12, Number(settings().sceneContext ?? 4)));
+    const before = [];
+    for (let i = idx - 1; i >= 0 && before.length < n; i--) {
+        if (chat[i].is_system || !chat[i].mes) continue;
+        before.unshift(`${chat[i].name}: ${plainText(compactTags(chat[i].mes)).slice(-1200)}`);
+    }
     const instruction = SCENE_PROMPT_TEMPLATE
         .replaceAll('{{iig_names}}', namesList())
-        .replaceAll('{{iig_scene}}', `${msg.name}: ${scene}`);
+        .replaceAll('{{iig_examples}}', formatExamples(activeExamples()))
+        .replaceAll('{{iig_context}}', before.join('\n\n') || '(start of the chat)')
+        .replaceAll('{{iig_scene}}', `${msg.name}: ${scene}`)
+        .replace(/\n{3,}/g, '\n\n');
 
     // Our own injection asks for <img> tags; mute it so we get a bare prompt back.
     const s = settings();

@@ -223,7 +223,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/mock/v1/images/generations' && req.method === 'POST') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
         const body = JSON.parse(await readBody(req));
-        lastRequest = { ...body, image: Array.isArray(body.image) ? body.image.length : body.image ? 1 : 0 };
+        lastRequest = { ...body, image: Array.isArray(body.image) ? body.image.length : body.image ? 1 : 0, at: Date.now() };
         if (!OPENAI_MODELS.includes(body.model)) {
             return send(res, 400, { error: { message: `The model \`${body.model}\` does not exist or you do not have access to it.`, type: 'invalid_request_error', code: 'model_not_found' } });
         }

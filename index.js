@@ -173,6 +173,12 @@ function wireEvents() {
             chat.decorateMessage(Number(mesId));
         }
     };
+    // Start images while the reply is still streaming.
+    on(ev.GENERATION_STARTED, (type, opts, dryRun) => chat.onGenerationStarted(type, opts, dryRun));
+    on(ev.GENERATION_ENDED, () => chat.onGenerationEnded());
+    on(ev.GENERATION_STOPPED, () => chat.onGenerationEnded());
+    on(ev.STREAM_TOKEN_RECEIVED, (text) => { try { chat.onStreamToken(text); } catch (e) { log('warn', `Early start failed: ${e.message}`); } });
+
     on(ev.MESSAGE_UPDATED, redecorate);
     on(ev.MESSAGE_EDITED, redecorate);
     on(ev.MESSAGE_SWIPED, redecorate);
@@ -192,7 +198,7 @@ function wireEvents() {
     });
 
     onSettingsChange((key) => {
-        if (['inject', 'injectTemplate', 'injectDepth', 'injectMax', 'refs', 'enabled', 'all'].includes(key)) updateInjection();
+        if (['inject', 'injectTemplate', 'injectDepth', 'injectMax', 'refs', 'enabled', 'all', 'promptExamples', 'charExamples', 'examplesMax'].includes(key)) updateInjection();
     });
 }
 

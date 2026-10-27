@@ -15,7 +15,7 @@ import {
 } from '../settings.js';
 import { ctx, getCharName, getUserName, log, toast, uid } from '../st.js';
 import { deleteFile, uploadRef } from '../storage.js';
-import { chipSelect, debounce, field, h, icon, toggle } from './dom.js';
+import { chipSelect, debounce, field, h, icon, setChildren, toggle } from './dom.js';
 import { confirmDialog } from './editor.js';
 import { openViewer } from './viewer.js';
 
@@ -77,7 +77,7 @@ export function createRefsTab() {
 
     function renderTest() {
         const m = matchRefs(tester.value);
-        testOut.replaceChildren(...(m.length
+        setChildren(testOut, ...(m.length
             ? m.map(x => h('span.iig-chip.static', { title: LAYER_LABEL[x.layer] }, h('img.iig-chip-thumb', { src: x.path, alt: '' }),
                 `${x.name}${x.reason === 'always' ? ' (always)' : ''}`, h('small.iig-layer-tag', {}, LAYER_LABEL[x.layer])))
             : [h('span.iig-muted', {}, tester.value ? 'No reference would be sent' : '')]));
@@ -225,7 +225,7 @@ export function createRefsTab() {
             },
         }));
 
-        el.replaceChildren(
+        setChildren(el, 
             h('div.iig-card', {},
                 field('Editing', scope.el, LAYER_HINT[layer]),
                 layer === 'chat' && refLayer('chat') ? h('div.iig-row', {}, h('button.iig-btn.small.ghost', {

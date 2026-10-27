@@ -2,7 +2,10 @@
  * Revamped Image Gen — small shared UI pieces. Licensed under AGPL-3.0-or-later.
  */
 
-import { h, icon } from './dom.js';
+import { IMAGE_SIZES } from '../constants.js';
+import { modelCaps } from '../models.js';
+import { settings } from '../settings.js';
+import { chipSelect, h, icon } from './dom.js';
 
 /** Chip content for an aspect ratio: a little shape drawn to scale, plus the label. */
 export function ratioChip(opt) {
@@ -35,4 +38,22 @@ export function tile(item, { onOpen, badge } = {}) {
         item.kind === 'video' ? h('span.iig-tile-badge', {}, icon('film')) : null,
         badge ? h('span.iig-tile-badge.left', {}, badge) : null,
     );
+}
+
+/**
+ * Resolution chips that follow the selected model: "Auto · 2K" plus only the
+ * sizes that model can make. Call refresh() after the model changes.
+ */
+export function sizeChips(value, onChange) {
+    const wrap = h('div.iig-size-chips');
+    let current = value || 'auto';
+    const draw = () => {
+        const caps = modelCaps(settings().model);
+        const sizes = caps.sizes.filter(x => IMAGE_SIZES.includes(x));
+        if (current !== 'auto' && !sizes.includes(current)) current = 'auto';
+        const opts = [{ value: 'auto', label: `Auto · ${caps.defaultSize || '1K'}`, title: `Use ${caps.label || 'the model'}'s default` }, ...sizes.map(x => ({ value: x, label: x }))];
+        wrap.replaceChildren(chipSelect(opts, current, (v) => { current = v; onChange(v); }).el);
+    };
+    draw();
+    return { el: wrap, refresh: draw, get value() { return current; } };
 }

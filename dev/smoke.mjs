@@ -259,6 +259,52 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         check(g.images === 1 && g.texts.some(t => t === 'Reference image 1 — Elodie:'), 'Gemini: character reference sent and labelled');
         const dims = await page.evaluate((src) => new Promise(r => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.src = src; }), item.src);
         check(dims[0] === 300 && dims[1] === 400, `Gemini: final image kept, thought draft skipped (${dims.join('x')})`);
+        check(await page.evaluate(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.model) === 'gemini-3-pro-image-preview',
+            'model-not-found: auto-switched to the id the key has (gemini-3-pro-image → -preview) and succeeded');
+
+        // Auto resolution follows the model: Pro → 2K, original Nano Banana → no imageSize (1K only).
+        await page.evaluate(() => window.RevampedImageGen.generate('Elodie at dawn', { aspect_ratio: '1:1', image_size: 'auto' }));
+        let g2 = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(g2.generationConfig?.imageConfig?.imageSize === '2K', `auto size for Nano Banana Pro is 2K (${g2.generationConfig?.imageConfig?.imageSize})`);
+
+        // Model picker from the Create tab: lists the key's models, flags the best and the missing ones.
+        await page.evaluate(() => window.RevampedImageGen.open('create'));
+        await page.locator('#iig-tab-create .iig-model-btn').click();
+        await page.waitForSelector('.iig-mp-row');
+        await page.waitForFunction(() => /image models? on your key/.test(document.querySelector('.iig-mp-status')?.textContent || ''), null, { timeout: 8000 });
+        await page.waitForTimeout(300); // let the open animation finish before screenshots
+        const rows = await page.locator('.iig-mp-row').allInnerTexts();
+        check(rows.some(t => t.includes('gemini-3-pro-image-preview') && t.includes('Best on your key')), 'picker marks the best model on the key');
+        check(rows.some(t => t.includes('gemini-3.1-flash-image') && t.includes('not on your key')), 'picker flags recommended models the key lacks');
+        check(!rows.some(t => /imagen|embedding|gemini-2\.5-flash\n/.test(t)), 'picker hides non-image and unsupported (Imagen) models');
+        await shot('10-model-picker');
+        await page.locator('.iig-mp-row', { hasText: 'gemini-2.5-flash-image' }).click();
+        await page.waitForTimeout(300);
+        const sizeLabels = await page.locator('#iig-tab-create .iig-size-chips .iig-chip').allInnerTexts();
+        check(sizeLabels.join('|') === 'Auto · 1K|1K', `resolution chips follow the model (${sizeLabels.join(', ')})`);
+        await page.evaluate(() => window.RevampedImageGen.generate('Elodie at dusk', { aspect_ratio: '1:1', image_size: 'auto' }));
+        g2 = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(g2.model === 'gemini-2.5-flash-image' && g2.generationConfig?.imageConfig && !('imageSize' in g2.generationConfig.imageConfig), 'original Nano Banana gets no imageSize');
+
+        // Diagnose: a model the key does not have is found, and the one-tap fix works.
+        await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.model = 'gemini-imaginary-9'; });
+        await page.locator('.iig-tab[data-tab="settings"]').click();
+        await page.evaluate(() => { [...document.querySelectorAll('#iig-tab-settings details.iig-section')].find(d => d.textContent.includes('Quick setup')).open = true; });
+        await page.getByRole('button', { name: 'Diagnose' }).click();
+        await page.waitForSelector('.iig-diag-verdict', { timeout: 15000 });
+        const diag = await page.locator('.iig-diag-step').allInnerTexts();
+        check(diag.some(t => t.includes('Model available') && t.includes('gemini-imaginary-9') && t.includes('Use gemini-3-pro-image-preview')), 'diagnose pinpoints the unavailable model and offers the fix');
+        await page.waitForTimeout(300);
+        await shot('11-diagnose-problem');
+        await page.locator('.iig-diag-step .iig-btn', { hasText: 'Use gemini-3-pro-image-preview' }).click();
+        await page.waitForSelector('.iig-diag-verdict.good', { timeout: 15000 });
+        await page.locator('.iig-diag-foot input[type="checkbox"]').check();
+        await page.locator('.iig-diag-foot .iig-btn.primary').click();
+        await page.waitForFunction(() => document.querySelector('.iig-diag-verdict.good')?.textContent.includes('real test image'), null, { timeout: 20000 });
+        check(true, 'diagnose: all stages pass after the fix, including a real test image');
+        await shot('11-diagnose-ok');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(250);
 
         // Layers: a chat-layer ref exists only in its chat; muting hides an inherited one.
         await page.locator('.iig-tab[data-tab="refs"]').click();

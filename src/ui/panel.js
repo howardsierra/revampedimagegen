@@ -407,8 +407,18 @@ export function mountPanel() {
         if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'i' || e.key === 'I' || e.code === 'KeyI')) {
             e.preventDefault();
             toggle();
-        } else if (e.key === 'Escape' && isOpen && !document.querySelector('.iig-modal, .iig-viewer.is-open')) {
-            if (panel.contains(document.activeElement) || !IS_TOUCH) close();
+        } else if (e.key === 'Escape') {
+            // Esc closes the topmost Studio dialog even when focus is elsewhere.
+            const modals = document.querySelectorAll('#iig-root .iig-modal.is-open');
+            const top = modals[modals.length - 1];
+            if (top && !top.contains(e.target)) {
+                e.preventDefault();
+                top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: false }));
+                return;
+            }
+            if (isOpen && !document.querySelector('.iig-modal, .iig-viewer.is-open')) {
+                if (panel.contains(document.activeElement) || !IS_TOUCH) close();
+            }
         }
     });
 

@@ -116,6 +116,9 @@ function serveFile(res, file) {
 const sanitize = s => String(s || '').replace(/[^\p{L}\p{N} _.-]/gu, '_').slice(0, 120);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let rateLimitedOnce = false;
+// What the mock "accounts" can use. Note: only the -preview Pro id exists, like a real key might.
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-image', 'gemini-3-pro-image-preview', 'text-embedding-004', 'imagen-4.0-generate-001'];
+const OPENAI_MODELS = ['mock-image-1', 'gpt-image-1', 'gpt-image-2', 'flux-dev', 'some-chat-model', 'whisper-1'];
 let lastRequest = null;
 
 // ---------------------------------------------------------------- routes
@@ -149,10 +152,19 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/mock/_last') return send(res, 200, lastRequest || {});
 
+    // Mock model lists. Like the real APIs, unknown model ids are rejected.
+    if (p === '/mockgem/v1/models' || p === '/mockgem/v1beta/models') {
+        if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { code: 401, message: 'API key not valid. Please pass a valid API key.', status: 'UNAUTHENTICATED' } });
+        return send(res, 200, { models: GEMINI_MODELS.map(id => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })) });
+    }
+
     // Mock Gemini generateContent: answers with a small "thought" draft image, then the real one.
     const gem = /^\/mockgem\/v1beta\/models\/([^/:]+):generateContent$/.exec(p);
     if (gem && req.method === 'POST') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'API key not valid' } });
+        if (!GEMINI_MODELS.includes(gem[1])) {
+            return send(res, 404, { error: { code: 404, message: `models/${gem[1]} is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.`, status: 'NOT_FOUND' } });
+        }
         const body = JSON.parse(await readBody(req));
         const parts = body.contents?.[0]?.parts || [];
         lastRequest = {
@@ -180,12 +192,15 @@ const server = http.createServer(async (req, res) => {
     // Mock OpenAI-compatible provider.
     if (p === '/mock/v1/models') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
-        return send(res, 200, { data: [{ id: 'mock-image-1' }, { id: 'gpt-image-1' }, { id: 'flux-dev' }, { id: 'some-chat-model' }] });
+        return send(res, 200, { data: OPENAI_MODELS.map(id => ({ id })) });
     }
     if (p === '/mock/v1/images/generations' && req.method === 'POST') {
         if (req.headers.authorization !== 'Bearer test-key') return send(res, 401, { error: { message: 'Invalid API key' } });
         const body = JSON.parse(await readBody(req));
         lastRequest = { ...body, image: Array.isArray(body.image) ? body.image.length : body.image ? 1 : 0 };
+        if (!OPENAI_MODELS.includes(body.model)) {
+            return send(res, 400, { error: { message: `The model \`${body.model}\` does not exist or you do not have access to it.`, type: 'invalid_request_error', code: 'model_not_found' } });
+        }
         const prompt = String(body.prompt || '');
         await sleep(Number(process.env.MOCK_DELAY) || 1200 + Math.random() * 1500);
         if (/\bfail\b/i.test(prompt)) return send(res, 400, { error: { message: 'Mock provider refused this prompt (contains "fail")' } });

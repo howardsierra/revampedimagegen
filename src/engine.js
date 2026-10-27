@@ -6,6 +6,8 @@
 
 import { ASPECT_RATIOS, IMAGE_SIZES, VIDEO_RESOLUTIONS } from './constants.js';
 import { withRetry } from './net.js';
+import { sizeFor } from './models.js';
+import { ensureValidModel } from './model-list.js';
 import { generateVideo, getProvider } from './providers.js';
 import { collectRefs } from './refs.js';
 import { settings } from './settings.js';
@@ -23,8 +25,9 @@ export function resolveOptions(kind, data, { fromStudio = false } = {}) {
     const tagWins = fromStudio || s.tagOverrides;
     const pick = (tagVal, def) => (tagWins ? (tagVal || def) : (def || tagVal));
     const ar = ASPECT_RATIOS.includes(data.aspect_ratio) ? data.aspect_ratio : (kind === 'video' ? '16:9' : s.aspectRatio);
-    let imageSize = pick(String(data.image_size || '').toUpperCase(), s.imageSize);
-    if (!IMAGE_SIZES.includes(imageSize)) imageSize = '1K';
+    // "Auto" (or anything the model cannot make) resolves to the model's own default.
+    const norm = (v) => { const u = String(v || '').toUpperCase(); return u === 'AUTO' ? 'auto' : (IMAGE_SIZES.includes(u) || u === '512' ? u : ''); };
+    const imageSize = sizeFor(s.model, pick(norm(data.image_size), norm(s.imageSize) || 'auto') || 'auto');
     const raw = String(data.prompt || '').trim();
     const prompt = fromStudio ? raw : [s.promptPrefix, raw, s.promptSuffix].map(x => String(x || '').trim()).filter(Boolean).join(' ');
     return {
@@ -85,7 +88,7 @@ export async function generate(kind, data, { signal, setStatus = () => {}, fromS
     setStatus(kind === 'video' ? 'Rendering video…' : 'Generating…');
     log('info', `${provider.label}: ${kind} "${opts.prompt.slice(0, 60)}" ar=${opts.aspectRatio} size=${opts.imageSize} refs=${refs.length}`);
 
-    const result = await withRetry(
+    const attempt = () => withRetry(
         () => (kind === 'video' ? generateVideo(req, s) : provider.generate(req, s)),
         {
             retries: Number(s.maxRetries) || 0,
@@ -94,10 +97,30 @@ export async function generate(kind, data, { signal, setStatus = () => {}, fromS
             onRetry: (n, wait, e) => setStatus(`${shortError(e)} — retry ${n} in ${Math.ceil(wait / 1000)}s`),
         },
     );
+    let result;
+    try {
+        result = await attempt();
+    } catch (e) {
+        // "Model not found" usually means the id is stale or not on this key.
+        // Switch to the matching model the key does have and try once more.
+        if (kind !== 'image' || !isModelNotFound(e)) throw e;
+        setStatus('Model not found — checking your models…');
+        const fixed = await ensureValidModel();
+        if (!fixed.changed) throw e;
+        setStatus(`Retrying with ${fixed.model}…`);
+        result = await attempt();
+    }
 
     setStatus('Saving…');
     const saved = await persistResult(result, { useCorsProxy: s.useCorsProxy, signal });
     return { ...saved, options: opts, refNames, provider: provider.id, model: kind === 'video' ? s.videoModel : s.model, ms: Date.now() - t0 };
+}
+
+export function isModelNotFound(e) {
+    const st = e?.status;
+    const body = String(e?.body || e?.message || '');
+    if (st !== 404 && st !== 400) return false;
+    return /model/i.test(body) && /not (found|exist|available|support)|unknown model|invalid model|does not exist|no such model|is not found/i.test(body);
 }
 
 export function shortError(e) {
@@ -111,9 +134,10 @@ export function hintFor(e) {
     const msg = String(e?.message || '').toLowerCase();
     const status = e?.status;
     if (status === 401 || status === 403 || /unauthor|invalid api key|permission/.test(msg)) return 'The provider rejected your key. Re-check the API key, and that this key can use the selected model.';
+    if (isModelNotFound(e)) return 'That model is not available on your key. Tap the model in Settings → Connection to choose one from your account.';
     if (status === 404) return s.provider === 'openai'
         ? 'Path not found. If your provider documents a prefix (like /v1 or /compatible), include it in the endpoint, or try the Gemini-compatible type.'
-        : 'Path not found. Check the endpoint URL and the model name.';
+        : 'Path not found. Check the endpoint URL and the model name — or run Diagnose.';
     if (status === 413) return 'Request too large — try fewer reference images.';
     if (status === 429) return 'Rate limited. Lower "Parallel jobs" in Settings → Behaviour.';
     if (/cors|network error/.test(msg)) return 'The browser could not reach the provider. Enable "Route through ST CORS proxy" (needs enableCorsProxy: true in config.yaml).';

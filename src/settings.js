@@ -36,7 +36,7 @@ export const DEFAULTS = Object.freeze({
     tagOverrides: true,
     defaultStyle: '',
     aspectRatio: '1:1',
-    imageSize: '1K',
+    imageSize: 'auto',              // auto = each model's own default (e.g. 2K for Nano Banana Pro)
     quality: 'auto',
     promptPrefix: '',
     promptSuffix: '',
@@ -106,6 +106,8 @@ export function settings() {
         }
         if (!s.refs || typeof s.refs !== 'object') s.refs = structuredClone(DEFAULTS.refs);
         if (!Array.isArray(s.captureRules)) s.captureRules = defaultRules();
+        // v1.2: resolution became model-driven by default.
+        if (!s._autoSizeMigrated) { s.imageSize = 'auto'; s._autoSizeMigrated = true; }
         // Add built-in rules introduced after the user's settings were created.
         for (const b of BUILTIN_RULES) {
             if (!s.captureRules.some(r => r.id === b.id)) s.captureRules.push({ id: b.id, name: b.name, pattern: b.pattern, flags: b.flags, enabled: false, builtin: true, kind: 'image' });

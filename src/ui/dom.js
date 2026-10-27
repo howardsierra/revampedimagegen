@@ -44,6 +44,12 @@ export function icon(name, extra = '') {
     return h('i', { class: `fa-solid fa-${name} ${extra}`.trim(), 'aria-hidden': 'true' });
 }
 
+/** replaceChildren that skips null/undefined/false (replaceChildren would print "null"). */
+export function setChildren(el, ...children) {
+    el.replaceChildren(...children.flat(Infinity).filter(c => c !== null && c !== undefined && c !== false));
+    return el;
+}
+
 export function clear(el) {
     while (el.firstChild) el.firstChild.remove();
     return el;

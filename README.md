@@ -24,7 +24,7 @@ If you used notsosillynotsoimages, open **Settings → Import & diagnostics → 
 
 ## Quick start
 
-1. **Settings → Connection → Quick setup**: tap **Nano Banana** (Google AI Studio key), **GPT Image** (OpenAI key) or **Both via OpenRouter**. Paste your key, pick a model chip, then tap **Test**.
+1. **Settings → Connection → Quick setup**: tap **Nano Banana** (Google AI Studio key), **GPT Image** (OpenAI key) or **Both via OpenRouter**, then paste your key. The extension checks which models your key can actually use and picks the best one automatically. To change it, tap the model button (also at the top of the Create tab).
 2. Chat as usual. **AI instructions** are on by default, so the chat model is already told how to write image tags. You don't need to edit your preset.
 3. Images show up in the reply as they finish, with a live placeholder (status, elapsed time, Cancel) while they generate.
 
@@ -51,7 +51,13 @@ The extension knows what each model can do and adjusts every request. Model IDs 
   - Options: **High input fidelity** (gpt-image-1.x keeps faces closer to the references), **Moderation: low**, and **WebP/JPEG output** for smaller files.
   - Quality offers `xhigh`/`max` on 2.5.
 - **Aggregators:** if a proxy rejects one of the newer parameters, it is dropped and the request retried once.
-- The **Create** tab greys out sizes the selected model can't produce. **Max photos per image** defaults to the model's sensible limit.
+- **Resolution defaults to Auto**, which picks each model's own best size (2K for Nano Banana Pro, 1K for the others). The size chips only offer what the selected model can make, and a fixed size is clamped to the model's limits.
+- **Model picker** (bottom sheet on phones, dialog on desktop):
+  - It lists the image models your key can actually use, fetched live, with a search box.
+  - It marks the best one, and flags recommended models your key doesn't have.
+  - Each model shows its sizes and how many reference photos it takes.
+  - You can still type any custom ID.
+- **Max photos per image** defaults to the model's sensible limit.
 
 ## References per chat, per character, or everywhere
 
@@ -188,6 +194,22 @@ Other extensions can call `window.RevampedImageGen.generate(prompt, { aspect_rat
 - **"This character" reference layer**: `settings.json`, keyed by the character card's avatar file.
 
 ## Troubleshooting
+
+**Generations failing? Run Diagnose.** It's in Settings → Connection, and there's a **Why?** button on every failed image and in the Queue. It checks each stage separately and tells you which one breaks and how to fix it:
+
+1. your settings
+2. reaching the provider and having your key accepted
+3. whether your model exists on your key
+4. saving to SillyTavern
+5. optionally, a real test image
+
+**Copy report** gives you a shareable summary, with API keys masked.
+
+The extension also fixes the most common cause by itself. If your selected model isn't available on your key (providers rename models, e.g. adding `-preview`), it switches to the matching or best model you do have:
+
+- at startup
+- when you change your key
+- after a "model not found" error, retrying once
 
 | Symptom | Try |
 |---|---|

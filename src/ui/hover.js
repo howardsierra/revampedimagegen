@@ -6,7 +6,7 @@
 
 import * as chat from '../chat.js';
 import { settings } from '../settings.js';
-import { h, icon, downloadUrl, onLongPress } from './dom.js';
+import { downloadUrl, h, icon, onLongPress, setChildren } from './dom.js';
 import { viewChatElement } from './actions.js';
 
 const SELECTOR = '#chat .mes_text img.iig-img, #chat .mes_text img.iig-img-error';
@@ -27,7 +27,7 @@ export function installHover() {
         clearTimeout(hideTimer);
         target = img;
         const isError = img.classList.contains('iig-img-error');
-        bar.replaceChildren(
+        setChildren(bar, 
             btn('rotate-right', isError ? 'Retry' : 'Regenerate', el => chat.regenerateElement(el)),
             btn('expand', 'Open', el => viewChatElement(el)),
             isError ? null : btn('download', 'Save', el => downloadUrl(el.getAttribute('src'))),

@@ -5,7 +5,7 @@
  * arrows, Esc. Licensed under AGPL-3.0-or-later.
  */
 
-import { h, icon, copyText } from './dom.js';
+import { copyText, h, icon, setChildren } from './dom.js';
 import { toast } from '../st.js';
 
 let el;
@@ -223,7 +223,7 @@ function renderInfo(item) {
         ['References', item.refs?.length ? item.refs.join(', ') : null],
         ['File', item.src],
     ].filter(([, v]) => v);
-    infoBox.replaceChildren(
+    setChildren(infoBox, 
         ...rows.map(([k, v]) => h('div.iig-info-row', {}, h('span.k', {}, k), h('span.v', {}, String(v)))),
         h('button.iig-btn.small', { type: 'button', onclick: async () => { if (await copyText(item.prompt || d.prompt || '')) toast.success('Prompt copied'); } }, icon('copy'), ' Copy prompt'),
     );
@@ -245,7 +245,7 @@ function render() {
     caption.textContent = item.prompt || '';
     el.classList.toggle('single', items.length < 2);
     renderInfo(item);
-    actionsBar.replaceChildren(...getActions(item).map(a => h(`button.iig-viewer-act${a.primary ? '.primary' : ''}${a.danger ? '.danger' : ''}`, {
+    setChildren(actionsBar, ...getActions(item).map(a => h(`button.iig-viewer-act${a.primary ? '.primary' : ''}${a.danger ? '.danger' : ''}`, {
         type: 'button',
         title: a.label,
         onclick: async () => {

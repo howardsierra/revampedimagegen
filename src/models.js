@@ -25,25 +25,59 @@
 const GEMINI_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'];
 const GPT_Q = ['auto', 'low', 'medium', 'high'];
 
+// rank: higher = preferred when auto-picking from the models a key can use.
+// defaultSize: what "Auto" resolution means for this model.
 const TABLE = [
     // ---- Nano Banana (Gemini image models)
-    { re: /gemini-3-pro-image|nano-banana-pro/i, caps: { family: 'nano-banana', label: 'Nano Banana Pro', sizes: ['1K', '2K', '4K'], ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Best quality and text rendering. Up to 14 input images, 5 of them people.' } },
-    { re: /nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['512', '1K', '2K', '4K'], ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model with high-resolution output.' } },
-    { re: /gemini-3\.1-flash-lite-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2 Lite', sizes: ['512', '1K'], ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 6, qualities: [], sendImageSize: true, note: 'Cheapest and fastest; lower detail.' } },
-    { re: /gemini-3\.1-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2', sizes: ['512', '1K', '2K', '4K'], ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast, good character consistency, up to 4K.' } },
-    { re: /gemini-2\.5-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana', sizes: ['1K'], ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 3, qualities: [], sendImageSize: false, note: 'Original Nano Banana. 1K only; works best with up to 3 input images.' } },
-    { re: /gemini.*image|imagen/i, caps: { family: 'nano-banana', label: 'Gemini image', sizes: ['1K', '2K', '4K'], ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 14, qualities: [], sendImageSize: true, note: '' } },
+    { re: /gemini-3-pro-image|nano-banana-pro/i, caps: { family: 'nano-banana', label: 'Nano Banana Pro', sizes: ['1K', '2K', '4K'], defaultSize: '2K', rank: 80, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Best quality and text rendering. Up to 14 input images, 5 of them people.' } },
+    { re: /nano-banana-2\.1/i, caps: { family: 'nano-banana', label: 'Nano Banana 2.1', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 92, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast Flash-class model with high-resolution output.' } },
+    { re: /gemini-3\.1-flash-lite-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2 Lite', sizes: ['512', '1K'], defaultSize: '1K', rank: 40, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 6, qualities: [], sendImageSize: true, note: 'Cheapest and fastest; lower detail.' } },
+    { re: /gemini-3\.1-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana 2', sizes: ['512', '1K', '2K', '4K'], defaultSize: '1K', rank: 90, ratios: GEMINI_RATIOS, maxRefs: 5, hardRefs: 14, qualities: [], sendImageSize: true, note: 'Fast, good character consistency, up to 4K.' } },
+    { re: /gemini-2\.5-flash-image/i, caps: { family: 'nano-banana', label: 'Nano Banana', sizes: ['1K'], defaultSize: '1K', rank: 60, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 3, qualities: [], sendImageSize: false, note: 'Original Nano Banana. 1K only; works best with up to 3 input images.' } },
+    { re: /^(?!.*imagen).*gemini.*image/i, caps: { family: 'nano-banana', label: 'Gemini image', sizes: ['1K', '2K', '4K'], defaultSize: '1K', rank: 30, ratios: GEMINI_RATIOS, maxRefs: 3, hardRefs: 14, qualities: [], sendImageSize: true, note: '' } },
+    { re: /imagen/i, caps: { family: 'imagen', label: 'Imagen', sizes: ['1K', '2K'], defaultSize: '1K', rank: 0, ratios: null, maxRefs: 0, hardRefs: 0, qualities: [], unsupported: 'Imagen uses a different API (:predict) — use a Nano Banana model instead.', note: '' } },
 
     // ---- GPT Image (OpenAI)
-    { re: /gpt-image-2\.5/i, caps: { family: 'gpt-image', label: 'GPT Image 2.5', sizes: ['1K', '2K', '4K'], ratios: null, maxRefs: 5, hardRefs: 16, qualities: [...GPT_Q, 'xhigh', 'max'], freeSize: true, note: 'Any size up to 3840×2160. Flare is faster; Sunburst is more detailed and better at edits.' } },
-    { re: /gpt-image-2/i, caps: { family: 'gpt-image', label: 'GPT Image 2', sizes: ['1K', '2K', '4K'], ratios: null, maxRefs: 5, hardRefs: 16, qualities: GPT_Q, freeSize: true, note: 'Any size up to 3840×2160 (above 2560×1440 is experimental).' } },
-    { re: /gpt-image-1-mini/i, caps: { family: 'gpt-image', label: 'GPT Image 1 mini', sizes: ['1K'], ratios: null, maxRefs: 4, hardRefs: 16, qualities: GPT_Q, note: 'Cheapest GPT Image. Square, 3:2 or 2:3 only.' } },
-    { re: /gpt-image-1(\.5)?|chatgpt-image/i, caps: { family: 'gpt-image', label: 'GPT Image 1.x', sizes: ['1K'], ratios: null, maxRefs: 4, hardRefs: 16, qualities: GPT_Q, fidelity: true, note: 'Square, 3:2 or 2:3. "High input fidelity" keeps faces closer to references.' } },
-    { re: /gpt-[0-9.]+-image/i, caps: { family: 'gpt-image', label: 'GPT image (chat)', sizes: ['1K'], ratios: null, maxRefs: 4, hardRefs: 10, qualities: [], note: 'Chat model with image output (via OpenRouter).' } },
-    { re: /dall-e-3/i, caps: { family: 'dall-e', label: 'DALL·E 3', sizes: ['1K', '2K'], ratios: null, maxRefs: 0, hardRefs: 0, qualities: ['standard', 'hd'], note: 'Retired by OpenAI; no reference images.' } },
+    { re: /gpt-image-2\.5/i, caps: { family: 'gpt-image', label: 'GPT Image 2.5', sizes: ['1K', '2K', '4K'], defaultSize: '1K', rank: 85, ratios: null, maxRefs: 5, hardRefs: 16, qualities: [...GPT_Q, 'xhigh', 'max'], freeSize: true, note: 'Any size up to 3840×2160. Flare is faster; Sunburst is more detailed and better at edits.' } },
+    { re: /gpt-image-2/i, caps: { family: 'gpt-image', label: 'GPT Image 2', sizes: ['1K', '2K', '4K'], defaultSize: '1K', rank: 88, ratios: null, maxRefs: 5, hardRefs: 16, qualities: GPT_Q, freeSize: true, note: 'Any size up to 3840×2160 (above 2560×1440 is experimental).' } },
+    { re: /gpt-image-1-mini/i, caps: { family: 'gpt-image', label: 'GPT Image 1 mini', sizes: ['1K'], defaultSize: '1K', rank: 50, ratios: null, maxRefs: 4, hardRefs: 16, qualities: GPT_Q, note: 'Cheapest GPT Image. Square, 3:2 or 2:3 only.' } },
+    { re: /gpt-image-1(\.5)?|chatgpt-image/i, caps: { family: 'gpt-image', label: 'GPT Image 1.x', sizes: ['1K'], defaultSize: '1K', rank: 70, ratios: null, maxRefs: 4, hardRefs: 16, qualities: GPT_Q, fidelity: true, note: 'Square, 3:2 or 2:3. "High input fidelity" keeps faces closer to references.' } },
+    { re: /gpt-[0-9.]+-image/i, caps: { family: 'gpt-image', label: 'GPT image (chat)', sizes: ['1K'], defaultSize: '1K', rank: 55, ratios: null, maxRefs: 4, hardRefs: 10, qualities: [], note: 'Chat model with image output (via OpenRouter).' } },
+    { re: /dall-e-3/i, caps: { family: 'dall-e', label: 'DALL·E 3', sizes: ['1K', '2K'], defaultSize: '1K', rank: 10, ratios: null, maxRefs: 0, hardRefs: 0, qualities: ['standard', 'hd'], note: 'Retired by OpenAI; no reference images.' } },
 ];
 
-const FALLBACK = { family: 'other', label: '', sizes: ['1K', '2K', '4K'], ratios: null, maxRefs: 4, hardRefs: 8, qualities: ['auto', 'low', 'medium', 'high', 'standard', 'hd'], note: '' };
+const FALLBACK = { family: 'other', label: '', sizes: ['1K', '2K', '4K'], defaultSize: '1K', rank: 1, ratios: null, maxRefs: 4, hardRefs: 8, qualities: ['auto', 'low', 'medium', 'high', 'standard', 'hd'], note: '' };
+
+/** Does this id look like an image-generation model? (Used to filter long model lists.) */
+export function isImageModelId(id) {
+    const m = String(id || '').toLowerCase();
+    if (/embed|tts|audio|whisper|transcri|moderation|lyria|robotics|veo|sora|video/.test(m)) return false;
+    return /image|banana|dall-e|flux|stable|sdxl|diffusion|seedream|ideogram|recraft|kolors|hidream|midjourney|qwen-image|grok-2-image|imagen/.test(m);
+}
+
+/**
+ * The best model for `provider` among `ids` (what the user's key can use),
+ * or null. Prefers the ranks above; ignores unsupported models.
+ */
+export function bestModel(ids) {
+    let best = null;
+    let bestRank = -1;
+    for (const id of ids || []) {
+        const c = modelCaps(id);
+        if (c.unsupported || c.family === 'other' || !isImageModelId(id)) continue;
+        // Prefer stable ids over dated snapshots / previews when ranks tie.
+        const rank = c.rank - (/preview|\d{4}-\d{2}-\d{2}|exp/i.test(id) ? 0.5 : 0);
+        if (rank > bestRank) { best = id; bestRank = rank; }
+    }
+    return best;
+}
+
+/** "Auto" resolution for a model, or the requested size clamped to what it supports. */
+export function sizeFor(model, requested = 'auto') {
+    const c = modelCaps(model);
+    if (!requested || requested === 'auto') return c.defaultSize || '1K';
+    return clampSize(requested, c.sizes);
+}
 
 /** Capabilities for a model id (provider prefixes like "google/" are fine). */
 export function modelCaps(model) {
@@ -112,6 +146,7 @@ export const RECIPES = [
         provider: 'gemini',
         endpoint: 'https://generativelanguage.googleapis.com',
         keyHint: 'Get a key at aistudio.google.com',
+        // Suggestions only — the picker checks them against the models your key can actually use.
         models: ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-nano-banana-2.1', 'gemini-2.5-flash-image', 'gemini-3.1-flash-lite-image'],
     },
     {

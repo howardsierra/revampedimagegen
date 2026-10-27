@@ -8,9 +8,10 @@ import { hintFor } from '../engine.js';
 import * as queue from '../queue.js';
 import { chatId } from '../st.js';
 import { chatItemActions, studioItemActions } from './actions.js';
-import { fmtElapsed, fmtTime, h, icon } from './dom.js';
+import { fmtElapsed, fmtTime, h, icon, setChildren } from './dom.js';
 import { openViewer } from './viewer.js';
 import { empty } from './widgets.js';
+import { openDiagnostics } from './diagnose-ui.js';
 
 const STATUS_ICON = {
     queued: 'clock',
@@ -69,8 +70,8 @@ export function createQueueTab() {
         const err = r.querySelector('.iig-job-error');
         if (job.status === 'error') {
             const hint = hintFor({ message: job.error });
-            err.replaceChildren(...[h('span', {}, job.error), hint ? h('small', {}, hint) : null].filter(Boolean));
-        } else err.replaceChildren();
+            setChildren(err, ...[h('span', {}, job.error), hint ? h('small', {}, hint) : null].filter(Boolean));
+        } else setChildren(err, );
 
         const acts = [];
         if (job.status === 'queued' || job.status === 'running') {
@@ -78,6 +79,7 @@ export function createQueueTab() {
         }
         if (job.status === 'error' || job.status === 'cancelled') {
             acts.push(h('button.iig-icon-btn', { type: 'button', title: 'Retry', 'aria-label': 'Retry', onclick: () => queue.retry(job.id) }, icon('rotate-right')));
+            if (job.status === 'error') acts.push(h('button.iig-icon-btn', { type: 'button', title: 'Why did it fail?', 'aria-label': 'Diagnose', onclick: () => openDiagnostics() }, icon('stethoscope')));
         }
         const src = job.result?.src || job.result?.path;
         if (job.status === 'done' && src) {
@@ -90,7 +92,7 @@ export function createQueueTab() {
             const mesId = job.result?.mesId ?? job.meta.mesId;
             acts.push(h('button.iig-icon-btn', { type: 'button', title: 'Go to message', 'aria-label': 'Go to message', onclick: () => chat.jumpToMessage(mesId) }, icon('location-crosshairs')));
         }
-        r.querySelector('.iig-job-actions').replaceChildren(...acts);
+        setChildren(r.querySelector('.iig-job-actions'), ...acts);
     }
 
     function render() {

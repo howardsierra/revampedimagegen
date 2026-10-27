@@ -2,17 +2,20 @@
  * Revamped Image Gen — Settings tab. Licensed under AGPL-3.0-or-later.
  */
 
-import { ASPECT_RATIOS, DEFAULT_INJECT_TEMPLATE, DEFAULT_STYLES, DISPLAY_NAME, IMAGE_SIZES, VERSION, VIDEO_RESOLUTIONS } from '../constants.js';
+import { ASPECT_RATIOS, DEFAULT_INJECT_TEMPLATE, DEFAULT_STYLES, DISPLAY_NAME, VERSION, VIDEO_RESOLUTIONS } from '../constants.js';
 import { applyCapture, compileRule } from '../capture.js';
 import { RECIPES, modelCaps } from '../models.js';
+import { ensureValidModel, forgetModels } from '../model-list.js';
+import { modelButton } from './model-picker.js';
+import { openDiagnostics } from './diagnose-ui.js';
 import { PROVIDERS, getProvider, normalizeNaisteraModel } from '../providers.js';
 import { renderInjection, updateInjection } from '../prompt.js';
 import { clearRefCache } from '../refs.js';
-import { applyProfile, importLegacy, legacySettings, save, settings, snapshotProfile, updateActiveProfile } from '../settings.js';
+import { applyProfile, importLegacy, legacySettings, onSettingsChange, save, settings, snapshotProfile, updateActiveProfile } from '../settings.js';
 import { logsAsText, onLog, toast, uid } from '../st.js';
-import { chipSelect, copyText, debounce, field, h, icon, section, toggle } from './dom.js';
+import { chipSelect, copyText, debounce, field, h, icon, section, setChildren, toggle } from './dom.js';
 import { confirmDialog } from './editor.js';
-import { ratioChip } from './widgets.js';
+import { ratioChip, sizeChips } from './widgets.js';
 
 export function createSettingsTab() {
     const el = h('section');
@@ -92,7 +95,11 @@ export function createSettingsTab() {
 
         const providerSel = select('provider', Object.values(PROVIDERS).map(p => ({ value: p.id, label: p.label })), () => render());
 
-        const key = text('apiKey', { type: 'password', placeholder: provider.keyRequired ? 'Required' : 'Optional' });
+        const key = text('apiKey', {
+            type: 'password', placeholder: provider.keyRequired ? 'Required' : 'Optional',
+            // A new key may see different models: re-check, and auto-fix an unavailable model.
+            onAfter: debounce(() => { forgetModels(); ensureValidModel().then(() => paintCaps()); }, 900),
+        });
         const eye = h('button.iig-icon-btn', {
             type: 'button', 'aria-label': 'Show key', onclick: () => {
                 key.type = key.type === 'password' ? 'text' : 'password';
@@ -100,57 +107,19 @@ export function createSettingsTab() {
             },
         }, icon('eye'));
 
-        const modelList = h('datalist', { id: 'iig-model-list' });
         const capsLine = h('div.iig-caps');
         const paintCaps = () => {
             const m = settings().model;
             const c = modelCaps(m);
             capsLine.hidden = !m;
             if (!m) return;
-            const bits = [c.label || 'Unknown model', `sizes ${c.sizes.join('/')}`];
-            if (c.hardRefs) bits.push(`refs: ${c.maxRefs} by default, up to ${c.hardRefs}`);
-            else bits.push('no reference images');
-            capsLine.replaceChildren(h('strong', {}, bits[0]), h('span', {}, bits.slice(1).join(' · ')), c.note ? h('small', {}, c.note) : null);
+            const bits = [`sizes ${c.sizes.filter(x => x !== '512').join('/')} (auto ${c.defaultSize})`];
+            bits.push(c.hardRefs ? `refs: ${c.maxRefs} by default, up to ${c.hardRefs}` : 'no reference images');
+            setChildren(capsLine, ...[h('span', {}, bits.join(' · ')), (c.unsupported || c.note) ? h('small', {}, c.unsupported || c.note) : null].filter(Boolean));
+            capsLine.classList.toggle('is-warn', !!c.unsupported);
         };
-        const model = text('model', { placeholder: provider.supportsModels ? 'Type or fetch…' : '', list: 'iig-model-list', onAfter: () => { paintCaps(); markRec(); } });
-        const recipe = RECIPES.find(r => r.provider === provider.id && r.models.length);
-        const recChips = h('div.iig-chips', {}, (recipe?.models || []).map(m => h('button.iig-chip', {
-            type: 'button', dataset: { model: m }, title: modelCaps(m).note,
-            onclick: () => { model.value = m; settings().model = m; save('model'); paintCaps(); markRec(); },
-        }, modelCaps(m).label, h('small.iig-chip-sub', {}, m))));
-        const markRec = () => { for (const b of recChips.children) b.classList.toggle('active', b.dataset.model === settings().model); };
+        const modelBtn = modelButton();
         paintCaps();
-        markRec();
-        const modelPick = h('div.iig-model-pick', { hidden: true });
-        const fetchBtn = h('button.iig-btn.small', {
-            type: 'button', onclick: async () => {
-                fetchBtn.disabled = true;
-                fetchBtn.classList.add('is-busy');
-                try {
-                    const list = await getProvider(settings().provider).listModels(settings());
-                    const imageish = list.filter(m => /banana|gpt-image|image|dall-e|flux|imagen|banana|sdxl|stable|diffusion|seedream|ideogram|recraft|kolors|hidream|midjourney|qwen|grok|gpt-5|veo|sora|kling|wan|seedance/i.test(m));
-                    const shown = (imageish.length ? imageish : list).slice(0, 300);
-                    modelList.replaceChildren(...shown.map(m => h('option', { value: m })));
-                    modelPick.hidden = !shown.length;
-                    modelPick.replaceChildren(...shown.map(m => h('button.iig-chip', {
-                        type: 'button', onclick: () => {
-                            model.value = m;
-                            settings().model = m;
-                            save('model');
-                            for (const b of modelPick.children) b.classList.toggle('active', b.textContent === m);
-                            paintCaps();
-                            markRec();
-                        },
-                    }, m)));
-                    toast.success(`Found ${list.length} model${list.length === 1 ? '' : 's'}${imageish.length && imageish.length !== list.length ? ` (${imageish.length} look image-capable)` : ''}`);
-                } catch (e) {
-                    toast.error(`Could not list models: ${e.message}`);
-                } finally {
-                    fetchBtn.disabled = false;
-                    fetchBtn.classList.remove('is-busy');
-                }
-            },
-        }, icon('list'), h('span', {}, 'Fetch'));
 
         const providerExtras = [];
         if (provider.id === 'naistera') {
@@ -221,6 +190,8 @@ export function createSettingsTab() {
                 save('provider');
                 render();
                 toast.info(r.keyHint, { timeOut: 6000 });
+                forgetModels();
+                if (st.apiKey) ensureValidModel();
                 setTimeout(() => el.querySelector('input[type="password"]')?.focus(), 50);
             },
         }, icon(r.icon), h('span.iig-recipe-title', {}, r.title), h('small', {}, r.subtitle))));
@@ -232,7 +203,7 @@ export function createSettingsTab() {
             field('Endpoint URL', text('endpoint', { type: 'url', placeholder: provider.defaultEndpoint || 'https://…', inputmode: 'url' }), 'Base URL only. Include any documented prefix such as /v1 or /compatible.'),
             field('API key', h('div.iig-input-group', {}, key, eye), 'Stored in SillyTavern\'s settings.json and masked in logs.'),
             provider.supportsModels || provider.id !== 'naistera'
-                ? field('Model', h('div.iig-stack', {}, recipe ? recChips : null, h('div.iig-input-group', {}, model, provider.supportsModels ? fetchBtn : null), capsLine, modelPick, modelList))
+                ? field('Model', h('div.iig-stack', {}, modelBtn.el, capsLine), 'Tap to see the models your key can use, with what each one supports.')
                 : null,
             ...providerExtras,
             provider.supportsRefs ? flag('sendRefs', 'Send reference images', 'Turn off for providers that reject image input') : null,
@@ -241,7 +212,7 @@ export function createSettingsTab() {
                 field('Path override', text('pathOverride', { placeholder: 'e.g. /api/v2/images or /v1beta/models/{model}:generateContent' }), 'Replaces the auto-appended path. Leave empty normally.'),
                 field('Request timeout (seconds)', text('timeoutSec', { type: 'number', min: 30, max: 1800 })),
             ),
-            h('div.iig-row', {}, testBtn),
+            h('div.iig-row.wrap', {}, testBtn, h('button.iig-btn.small', { type: 'button', title: 'Check every stage of a generation', onclick: () => openDiagnostics() }, icon('stethoscope'), h('span', {}, 'Diagnose'))),
         ], { open: !s.apiKey && provider.keyRequired, iconName: 'plug' });
     }
 
@@ -250,12 +221,12 @@ export function createSettingsTab() {
     function defaultsSection() {
         const s = settings();
         const ar = chipSelect(ASPECT_RATIOS, s.aspectRatio, (v) => { settings().aspectRatio = v; save('aspectRatio'); }, { className: 'iig-chips-scroll', render: ratioChip });
-        const size = chipSelect(IMAGE_SIZES, s.imageSize, (v) => { settings().imageSize = v; save('imageSize'); });
+        const size = sizeChips(s.imageSize || 'auto', (v) => { settings().imageSize = v; save('imageSize'); });
         return section('Image defaults', [
             flag('tagOverrides', 'Let the AI\'s tag choose style & size', 'Off: your defaults below always win (aspect ratio still follows the tag)'),
             field('Default style', text('defaultStyle', { placeholder: 'e.g. semi-realistic digital painting', list: 'iig-style-list' })),
             field('Aspect ratio (when the tag has none)', ar.el),
-            field('Resolution', size.el),
+            field('Resolution', size.el, 'Auto picks each model\'s own best size; a fixed size is clamped to what the model supports.'),
             field('Quality (GPT Image)', select('quality', (modelCaps(s.model).qualities.length ? modelCaps(s.model).qualities : ['auto', 'low', 'medium', 'high']).map(q => ({ value: q, label: q })))),
             h('div.iig-row-2', {}, field('Prompt prefix', text('promptPrefix', { placeholder: 'Added before every chat prompt' })), field('Prompt suffix', text('promptSuffix', { placeholder: 'Added after' }))),
             field('Negative prompt', text('negativePrompt', { placeholder: 'Used where supported (SD WebUI, some aggregators)' })),
@@ -329,9 +300,9 @@ export function createSettingsTab() {
         const sample = h('textarea.iig-input', { rows: 4, placeholder: 'Paste a sample AI reply to test the enabled rules…', oninput: debounce(() => runTest(), 200) });
         const out = h('div.iig-stack.iig-capture-out');
         const runTest = () => {
-            if (!sample.value.trim()) { out.replaceChildren(); return; }
+            if (!sample.value.trim()) { setChildren(out, ); return; }
             const { captured, errors } = applyCapture(sample.value, st.captureRules);
-            out.replaceChildren(
+            setChildren(out, 
                 ...errors.map(e => h('div.iig-capture-err', {}, icon('triangle-exclamation'), ` ${e.rule}: ${e.error}`)),
                 ...(captured.length
                     ? captured.map(c => h('div.iig-capture-hit', {}, h('small.iig-muted', {}, c.rule), h('div', {}, c.data.prompt),
@@ -491,7 +462,7 @@ export function createSettingsTab() {
         if (!visible) return;
         const openState = [...el.querySelectorAll('details.iig-section')].map(d => d.open);
         const styleList = h('datalist', { id: 'iig-style-list' }, settings().styles.map(st => h('option', { value: st.value }, st.name)));
-        el.replaceChildren(
+        setChildren(el, 
             h('div.iig-card.iig-card-slim', {},
                 flag('enabled', 'Image generation on', null, () => { updateInjection(); render(); }),
             ),
@@ -509,6 +480,8 @@ export function createSettingsTab() {
         // Keep sections the user had open across re-renders.
         el.querySelectorAll('details.iig-section').forEach((d, i) => { if (openState[i] !== undefined) d.open = openState[i]; });
     }
+
+    onSettingsChange((key) => { if (key === 'model' && visible) render(); });
 
     return {
         id: 'settings',

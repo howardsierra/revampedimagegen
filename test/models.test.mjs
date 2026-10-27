@@ -41,3 +41,29 @@ test('gpt free sizes obey the API constraints', () => {
     assert.equal(gptStandardSize('16:9'), '1536x1024');
     assert.equal(gptStandardSize('3:4'), '1024x1536');
 });
+
+import { bestModel, isImageModelId, sizeFor } from '../src/models.js';
+
+test('picks the best image model the key actually has', () => {
+    assert.equal(bestModel(['gemini-2.5-flash', 'gemini-2.5-flash-image', 'gemini-3-pro-image-preview', 'imagen-4.0-generate-001']), 'gemini-3-pro-image-preview');
+    assert.equal(bestModel(['gpt-4o', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3', 'whisper-1']), 'gpt-image-1');
+    assert.equal(bestModel(['gpt-image-2', 'gpt-image-2-2026-04-21']), 'gpt-image-2', 'stable id beats dated snapshot');
+    assert.equal(bestModel(['imagen-4.0-generate-001', 'text-embedding-004']), null, 'Imagen is not usable here');
+    assert.equal(bestModel([]), null);
+});
+
+test('image model filter', () => {
+    assert.ok(isImageModelId('google/gemini-2.5-flash-image'));
+    assert.ok(isImageModelId('gpt-image-2.5-flare'));
+    assert.ok(!isImageModelId('gemini-2.5-flash'));
+    assert.ok(!isImageModelId('veo-3.0-generate'));
+    assert.ok(!isImageModelId('gemini-3.1-flash-tts-preview'));
+});
+
+test('auto resolution per model', () => {
+    assert.equal(sizeFor('gemini-3-pro-image-preview'), '2K');
+    assert.equal(sizeFor('gemini-2.5-flash-image', 'auto'), '1K');
+    assert.equal(sizeFor('gemini-2.5-flash-image', '4K'), '1K', 'clamped to what the model can make');
+    assert.equal(sizeFor('gpt-image-2', '2K'), '2K');
+    assert.equal(sizeFor('gpt-image-1', '4K'), '1K');
+});

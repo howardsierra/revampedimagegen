@@ -4,9 +4,8 @@
  * Licensed under AGPL-3.0-or-later.
  */
 
-import { ASPECT_RATIOS, IMAGE_SIZES } from '../constants.js';
+import { ASPECT_RATIOS } from '../constants.js';
 import { describeScene } from '../prompt.js';
-import { modelCaps } from '../models.js';
 import { getProvider } from '../providers.js';
 import * as queue from '../queue.js';
 import { matchRefs } from '../refs.js';
@@ -14,9 +13,10 @@ import { onSettingsChange, save, settings } from '../settings.js';
 import { onStudioChange, runStudio, studioHistory } from '../studio.js';
 import { toast } from '../st.js';
 import { studioItemActions } from './actions.js';
-import { chipSelect, debounce, field, h, icon } from './dom.js';
+import { chipSelect, debounce, field, h, icon, setChildren } from './dom.js';
 import { openViewer } from './viewer.js';
-import { empty, ratioChip, tile } from './widgets.js';
+import { empty, ratioChip, sizeChips, tile } from './widgets.js';
+import { modelButton } from './model-picker.js';
 
 export function createTab({ show }) {
     const s = settings();
@@ -81,7 +81,7 @@ export function createTab({ show }) {
 
     // --- shape & size & count
     const ar = chipSelect(ASPECT_RATIOS.map(r => ({ value: r, label: r })), draft.aspect_ratio || s.aspectRatio, v => set('aspect_ratio', v), { className: 'iig-chips-scroll', render: ratioChip });
-    const size = chipSelect(IMAGE_SIZES, draft.image_size || s.imageSize, v => set('image_size', v));
+    const size = sizeChips(draft.image_size || s.imageSize || 'auto', v => set('image_size', v));
     const countLabel = h('span.iig-stepper-value', {}, String(draft.count || 1));
     const step = (d) => {
         const n = Math.min(4, Math.max(1, (Number(draft.count) || 1) + d));
@@ -96,6 +96,9 @@ export function createTab({ show }) {
     );
     const sizeField = field('Resolution', size.el);
 
+    // --- model (one tap to switch, on any device)
+    const modelBtn = modelButton({ compact: true });
+
     // --- refs preview
     const refsLine = h('div.iig-refs-line');
     const useRefs = h('input', { type: 'checkbox', checked: draft.useRefs !== false, onchange: () => { set('useRefs', useRefs.checked); updateRefs(); } });
@@ -103,11 +106,11 @@ export function createTab({ show }) {
         const p = getProvider(settings().provider);
         const supports = draft.kind === 'video' || (p.supportsRefs && settings().sendRefs);
         if (!supports) {
-            refsLine.replaceChildren(h('span.iig-muted', {}, `${p.label} does not use reference images.`));
+            setChildren(refsLine, h('span.iig-muted', {}, `${p.label} does not use reference images.`));
             return;
         }
         const matched = useRefs.checked ? matchRefs(prompt.value) : [];
-        refsLine.replaceChildren(
+        setChildren(refsLine, 
             h('label.iig-inline-check', {}, useRefs, h('span', {}, 'References')),
             matched.length
                 ? h('div.iig-chips', {}, matched.map(m => h('span.iig-chip.static', { title: m.reason === 'always' ? 'Always sent' : 'Name found in prompt' },
@@ -138,7 +141,7 @@ export function createTab({ show }) {
             prompt: text,
             style: style.value.trim() || settings().defaultStyle || undefined,
             aspect_ratio: draft.aspect_ratio || settings().aspectRatio,
-            image_size: draft.image_size || settings().imageSize,
+            image_size: size.value,
             negative_prompt: negative.value.trim() || undefined,
             seed: seed.value === '' ? undefined : Number(seed.value),
             no_refs: !useRefs.checked || undefined,
@@ -171,7 +174,7 @@ export function createTab({ show }) {
             )),
             ...done.map((item, i) => tile(item, { onOpen: () => openViewer(done, i, it => studioItemActions(it, { usePrompt })) })),
         ];
-        results.replaceChildren(...(tiles.length ? tiles : [empty('images', 'Nothing yet', 'Your studio images for this chat show up here.')]));
+        setChildren(results, ...(tiles.length ? tiles : [empty('images', 'Nothing yet', 'Your studio images for this chat show up here.')]));
     }
 
     function syncKind() {
@@ -182,18 +185,15 @@ export function createTab({ show }) {
     }
 
     /** Grey out sizes the selected model cannot make (e.g. 4K on original Nano Banana). */
+    /** Resolution choices follow the selected model. */
     function syncCaps() {
-        const caps = modelCaps(settings().model);
-        for (const b of size.el.children) {
-            const ok = caps.sizes.includes(b.dataset.value);
-            b.disabled = !ok;
-            b.title = ok ? b.dataset.value : `${caps.label || 'This model'} does not support ${b.dataset.value}`;
-        }
+        size.refresh();
+        modelBtn.refresh();
     }
 
     const el = h('section', {},
         h('div.iig-card.iig-compose', {},
-            h('div.iig-compose-head', {}, kind.el, matchMedia('(pointer: fine)').matches ? h('span.iig-compose-hint', {}, 'Ctrl + Enter to generate') : null),
+            h('div.iig-compose-head', {}, kind.el, modelBtn.el),
             prompt,
             h('div.iig-compose-tools', {}, sceneBtn, h('span.iig-grow'), counter, clearBtn),
             refsLine,

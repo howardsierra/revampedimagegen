@@ -6,7 +6,7 @@
 
 import { layerAvailable, refLayer, settings } from '../settings.js';
 import { getCharName, getUserName, toast } from '../st.js';
-import { chipSelect, field, h, icon } from './dom.js';
+import { chipSelect, field, h, icon, setChildren } from './dom.js';
 import { LAYER_LABEL, useImageAsRef } from './tab-refs.js';
 
 export function openRefPicker(item) {
@@ -28,7 +28,7 @@ export function openRefPicker(item) {
         ];
         if (!opts.some(o => o.value === target)) target = 'char';
         const sel = chipSelect(opts, target, (v) => { target = v; newName.hidden = v !== 'new'; if (v === 'new') newName.focus(); });
-        targets.replaceChildren(sel.el, newName);
+        setChildren(targets, sel.el, newName);
         newName.hidden = target !== 'new';
     }
 

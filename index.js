@@ -26,9 +26,11 @@ import * as queue from './src/queue.js';
 import { installFlushOnHide, legacySettings, onSettingsChange, save, settings } from './src/settings.js';
 import { ctx, log, toast } from './src/st.js';
 import { runStudio } from './src/studio.js';
+import { ensureValidModel } from './src/model-list.js';
 import { viewChatElement } from './src/ui/actions.js';
 import { h, icon } from './src/ui/dom.js';
 import { openEditor } from './src/ui/editor.js';
+import { openDiagnostics } from './src/ui/diagnose-ui.js';
 import { installHover } from './src/ui/hover.js';
 import * as panel from './src/ui/panel.js';
 import { createTab } from './src/ui/tab-create.js';
@@ -215,7 +217,7 @@ function init() {
     buildPanel();
     buildDrawer();
     buildWandItem();
-    chat.installChatHandlers({ openViewer: viewChatElement, openEditor });
+    chat.installChatHandlers({ openViewer: viewChatElement, openEditor, openDiagnose: () => openDiagnostics() });
     installHover();
     installHistoryCompaction();
     wireEvents();
@@ -223,6 +225,8 @@ function init() {
     exposeApi();
     updateInjection();
     chat.decorateAll();
+    // Catch a stale or unavailable model before the first generation fails on it.
+    setTimeout(() => { if (settings().enabled) ensureValidModel().catch(() => {}); }, 2500);
     log('info', `${DISPLAY_NAME} v${VERSION} ready`);
     if (legacySettings() && !settings()._importedLegacy && !settings().apiKey) {
         toast.info('Found notsosillynotsoimages settings — import them from Image Studio → Settings → Import.', { timeOut: 8000 });

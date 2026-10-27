@@ -15,7 +15,7 @@ import * as queue from './queue.js';
 import { settings, save } from './settings.js';
 import { assetUrl, chatId, ctx, haptic, isAbort, log, toast } from './st.js';
 import { applyCapture } from './capture.js';
-import { buildTag, parseInstruction, parseTags, withData, withSrc } from './tags.js';
+import { buildTag, escapeHtml, parseInstruction, parseTags, withData, withSrc } from './tags.js';
 import { h, icon, fmtElapsed } from './ui/dom.js';
 
 const inflight = new Map(); // `${chat}|${mesId}|${fullMatch}` -> jobId
@@ -165,6 +165,7 @@ function paintPlaceholder(el, job) {
         actions.replaceChildren(
             h('button.iig-ph-btn', { type: 'button', dataset: { act: 'retry' } }, icon('rotate-right'), h('span', {}, 'Retry')),
             h('button.iig-ph-btn', { type: 'button', dataset: { act: 'edit' } }, icon('pen'), h('span', {}, 'Edit')),
+            h('button.iig-ph-btn', { type: 'button', dataset: { act: 'diagnose' }, title: 'Find out why it failed' }, icon('stethoscope'), h('span', {}, 'Why?')),
         );
     } else {
         status.textContent = job.statusText;
@@ -307,7 +308,7 @@ export function queueTag(mesId, tag, { mode = 'new', dataOverride = null } = {})
                 if (settings().haptics) haptic([40, 60, 40]);
                 const hint = hintFor(e);
                 if (e.config) toast.warn(e.message);
-                else toast.error(`${e.message}${hint ? `<br><small>${hint}</small>` : ''}`, { escapeHtml: false });
+                else toast.error(`${escapeHtml(e.message)}${hint ? `<br><small>${escapeHtml(hint)}</small>` : ''}`, { escapeHtml: false });
             } else {
                 inflight.delete(key);
                 if (forChat === chatId()) swapIn(j, find, mesId);
@@ -484,7 +485,8 @@ export async function illustrateMessage(mesId) {
     const prompt = await describeScene(id);
     const c = ctx();
     const msg = c.chat[id];
-    const data = { prompt, aspect_ratio: s.aspectRatio, image_size: s.imageSize };
+    const data = { prompt, aspect_ratio: s.aspectRatio };
+    if (s.imageSize && s.imageSize !== 'auto') data.image_size = s.imageSize;
     if (s.defaultStyle) data.style = s.defaultStyle;
     msg.mes = `${msg.mes || ''}\n\n${buildTag('image', data, '[IMG:GEN]')}`;
     if (Array.isArray(msg.swipes) && Number.isInteger(msg.swipe_id)) msg.swipes[msg.swipe_id] = msg.mes;
@@ -579,7 +581,7 @@ export function chatMedia() {
 
 // ---------------------------------------------------------------- delegated events
 
-export function installChatHandlers({ openViewer, openEditor }) {
+export function installChatHandlers({ openViewer, openEditor, openDiagnose }) {
     queue.onQueue(syncPlaceholders);
     const chatRoot = document.getElementById('chat') || document.body;
 
@@ -594,6 +596,7 @@ export function installChatHandlers({ openViewer, openEditor }) {
             if (!job) return;
             if (phBtn.dataset.act === 'cancel') queue.cancel(job.id);
             if (phBtn.dataset.act === 'retry') queue.retry(job.id);
+            if (phBtn.dataset.act === 'diagnose') openDiagnose?.();
             if (phBtn.dataset.act === 'edit') {
                 openEditor({
                     title: 'Edit & retry',

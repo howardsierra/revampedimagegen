@@ -4,10 +4,10 @@
  * Licensed under AGPL-3.0-or-later.
  */
 
-import { ASPECT_RATIOS, IMAGE_SIZES, VIDEO_RESOLUTIONS } from '../constants.js';
+import { ASPECT_RATIOS, VIDEO_RESOLUTIONS } from '../constants.js';
 import { settings } from '../settings.js';
 import { h, icon, chipSelect, field } from './dom.js';
-import { ratioChip } from './widgets.js';
+import { ratioChip, sizeChips } from './widgets.js';
 
 /**
  * @param {{title?:string, kind?:'image'|'video', data:object, submitLabel?:string, onSubmit:(data)=>void}} opts
@@ -30,7 +30,7 @@ export function openEditor({ title = 'Edit prompt', kind = 'image', data = {}, s
         const res = chipSelect(VIDEO_RESOLUTIONS, state.resolution || s.videoResolution, v => { state.resolution = v; });
         extra.push(field('Duration (s)', dur), field('Resolution', res.el));
     } else {
-        const size = chipSelect(IMAGE_SIZES, state.image_size || s.imageSize, v => { state.image_size = v; });
+        const size = sizeChips(state.image_size || s.imageSize || 'auto', v => { state.image_size = v; });
         extra.push(field('Resolution', size.el));
     }
     const negative = h('input.iig-input', { type: 'text', value: state.negative_prompt || '', placeholder: 'Things to avoid (if supported)', oninput: () => { state.negative_prompt = negative.value; } });

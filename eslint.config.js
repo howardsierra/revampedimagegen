@@ -11,7 +11,7 @@ export default [
                 AbortController: 'readonly', XMLHttpRequest: 'readonly', ReadableStream: 'readonly', setTimeout: 'readonly',
                 clearTimeout: 'readonly', setInterval: 'readonly', requestAnimationFrame: 'readonly', performance: 'readonly',
                 matchMedia: 'readonly', innerWidth: 'readonly', innerHeight: 'readonly', atob: 'readonly', structuredClone: 'readonly',
-                getComputedStyle: 'readonly', prompt: 'readonly', globalThis: 'readonly', SillyTavern: 'readonly', toastr: 'readonly', HTMLInputElement: 'readonly', HTMLSelectElement: 'readonly', HTMLTextAreaElement: 'readonly',
+                getComputedStyle: 'readonly', prompt: 'readonly', confirm: 'readonly', KeyboardEvent: 'readonly', globalThis: 'readonly', SillyTavern: 'readonly', toastr: 'readonly', HTMLInputElement: 'readonly', HTMLSelectElement: 'readonly', HTMLTextAreaElement: 'readonly',
             },
         },
         rules: {

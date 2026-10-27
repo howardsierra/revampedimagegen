@@ -443,6 +443,9 @@ export function nanoDims(model, ar, imageSize) {
     return dimsFor(ar, imageSize, long);
 }
 
+// model id -> index of the request shape NanoGPT accepted (see generate()).
+const NANO_SHAPE = new Map();
+
 const nanogpt = {
     id: 'nanogpt',
     label: 'NanoGPT',
@@ -475,34 +478,55 @@ const nanogpt = {
     },
 
     async generate(req, s) {
-        const { width, height } = nanoDims(s.model, req.aspectRatio, req.imageSize);
-        const body = {
+        const caps = modelCaps(s.model);
+        const tier = clampSize(req.imageSize || '1K', caps.sizes);
+        const { width, height } = nanoDims(s.model, req.aspectRatio, tier);
+        const base = {
             model: s.model,
             prompt: composePrompt(req),
             n: 1,
-            size: `${width}x${height}`,
             response_format: 'b64_json',
         };
-        if (req.negative) body.negative_prompt = req.negative;
-        if (req.seed != null) body.seed = req.seed;
-        if (req.refs.length === 1) body.imageDataUrl = req.refs[0];
-        else if (req.refs.length > 1) body.imageDataUrls = req.refs;
+        if (req.negative) base.negative_prompt = req.negative;
+        if (req.seed != null) base.seed = req.seed;
+        if (req.refs.length === 1) base.imageDataUrl = req.refs[0];
+        else if (req.refs.length > 1) base.imageDataUrls = req.refs;
+        const wh = `${width}x${height}`;
+        const named = { resolution: tier, aspect_ratio: req.aspectRatio };
+        // Request shapes, tried in order on a size/resolution 400; the one that
+        // works is remembered per model. Tier-based models (Nano Banana) want
+        // the tier named ("1K"), not only WIDTHxHEIGHT.
+        const shapes = [
+            caps.family === 'nano-banana' ? { ...base, size: wh, ...named, image_size: tier } : { ...base, size: wh },
+            { ...base, size: tier, ...named },
+            { ...base, ...named },
+            { ...base, size: '1024x1024' },
+        ];
         const url = nanoUrl(s, this, '/api/v1/images/generations');
-        const send = () => requestJson(url, {
+        const send = (body) => requestJson(url, {
             method: 'POST',
             headers: { ...bearer(s), 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         }, { timeoutMs: req.timeoutMs, signal: req.signal });
-        try {
-            return parseOpenAiImage(await send());
-        } catch (e) {
-            // "supports 1K or 2K" is handled by the engine (it learns the sizes and retries).
-            // Other size complaints: fall back to the safe default once.
-            if (!(e instanceof HttpError && e.status === 400 && /size|resolution|dimension/i.test(e.body || '') && body.size !== '1024x1024') || parseSupportedSizes(e.body)) throw e;
-            log('warn', `NanoGPT rejected size ${body.size}; retrying at 1024x1024`);
-            body.size = '1024x1024';
-            return parseOpenAiImage(await send());
+        const first = NANO_SHAPE.get(s.model) || 0;
+        let lastErr;
+        for (let i = first; i < shapes.length; i++) {
+            try {
+                const out = parseOpenAiImage(await send(shapes[i]));
+                if (i !== first) log('info', `NanoGPT: ${s.model} accepted request shape ${i}`);
+                NANO_SHAPE.set(s.model, i);
+                return out;
+            } catch (e) {
+                lastErr = e;
+                const sizeErr = e instanceof HttpError && e.status === 400 && /size|resolution|dimension|aspect/i.test(e.body || '');
+                if (!sizeErr) throw e;
+                // A tier the model does not offer at all: let the engine learn the sizes and pick another.
+                const allowed = parseSupportedSizes(e.body);
+                if (allowed && !allowed.includes(tier)) throw e;
+                log('warn', `NanoGPT rejected request shape ${i} for ${s.model}: ${summarizeBody(e.body)}`);
+            }
         }
+        throw lastErr;
     },
 };
 

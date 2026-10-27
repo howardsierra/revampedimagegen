@@ -320,6 +320,12 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         const n4 = await page.evaluate(async () => (await fetch('/mock/_last')).json());
         const learned = await page.evaluate(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.learnedSizes?.['nano-banana-pro']);
         check(nano4k.ok && n4.size === '1536x2752' && learned?.join() === '1K,2K', `"supports 1K or 2K" error: learned the sizes and retried at 2K (${nano4k.err || n4.size})`);
+        // NanoGPT's Nano Banana 2.1 rejects WxH even at 1K: fall through request shapes, then remember the one that works.
+        await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.model = 'google/gemini-nano-banana-2.1'; });
+        const nb21 = await page.evaluate(() => window.RevampedImageGen.generate('Elodie at a storefront', { aspect_ratio: '9:16', image_size: 'auto' }).then(r => ({ ok: !!r?.src }), e => ({ err: e.message })));
+        const n21 = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(nb21.ok && n21.size === '1K' && n21.resolution === '1K' && n21.aspect_ratio === '9:16', `Nano Banana 2.1 on NanoGPT: tier named explicitly (${nb21.err || JSON.stringify({ size: n21.size, resolution: n21.resolution })})`);
+        await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.model = 'nano-banana-pro'; });
         await page.evaluate(() => window.RevampedImageGen.open('create'));
         await page.waitForTimeout(300);
         const nanoChips = await page.locator('#iig-tab-create .iig-size-chips .iig-chip').allInnerTexts();

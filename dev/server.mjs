@@ -123,6 +123,7 @@ const NANO_IMAGE_MODELS = {
     'nano-banana-pro': { model: 'nano-banana-pro', name: 'Nano Banana Pro' },
     'gemini-flash-edit': { model: 'gemini-flash-edit', name: 'Nano Banana' },
     'hidream': { model: 'hidream', name: 'HiDream' },
+    'google/gemini-nano-banana-2.1': { model: 'google/gemini-nano-banana-2.1', name: 'Nano Banana 2.1' },
 };
 let lastRequest = null;
 
@@ -206,6 +207,8 @@ const server = http.createServer(async (req, res) => {
         const body = JSON.parse(await readBody(req));
         lastRequest = { ...body, imageDataUrl: body.imageDataUrl ? 1 : 0, imageDataUrls: body.imageDataUrls?.length || 0, url: p };
         if (!Object.values(NANO_IMAGE_MODELS).some(m => m.model === body.model)) return send(res, 400, { error: { message: 'Invalid image model specified', type: 'invalid_request_error' } });
+        // Like NanoGPT's Nano Banana 2.1: only a named tier passes, whatever WxH says.
+        if (body.model === 'google/gemini-nano-banana-2.1' && !['1K', '2K'].includes(body.size)) return send(res, 400, { error: { message: 'Nano Banana 2.1 supports 1K or 2K resolution.' } });
         // Like NanoGPT: a provider can offer fewer tiers than the model has.
         if (Math.max(...String(body.size).split('x').map(Number)) > 3000) return send(res, 400, { error: { message: 'Nano Banana Pro supports 1K or 2K resolution.' } });
         await sleep(300);

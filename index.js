@@ -182,7 +182,14 @@ function wireEvents() {
     on(ev.MESSAGE_UPDATED, redecorate);
     on(ev.MESSAGE_EDITED, redecorate);
     on(ev.MESSAGE_SWIPED, redecorate);
-    on(ev.USER_MESSAGE_RENDERED, redecorate);
+    on(ev.USER_MESSAGE_RENDERED, (mesId) => {
+        if (!settings().processUserMessages) return redecorate(mesId);
+        try {
+            chat.processMessage(Number(mesId));
+        } catch (e) {
+            log('error', `processMessage failed: ${e.message}`);
+        }
+    });
     on(ev.MORE_MESSAGES_LOADED, () => chat.decorateAll());
 
     let chatTimer = null;
@@ -212,6 +219,20 @@ function exposeApi() {
             generate: async (prompt, opts = {}) => {
                 const [job] = runStudio({ data: { prompt, ...opts } });
                 return queue.waitFor(job.id);
+            },
+            /**
+             * Generate the pending tags (and capture-rule matches) already written into a
+             * chat message — user messages included — with the usual placeholders, Cancel,
+             * retries and chat-switch handling. Generates even when "Generate automatically"
+             * is off (pass { force: false } to respect it). Resolves once every job settles:
+             * [{ ok, path?, error? }].
+             */
+            processMessage: async (mesId, { force = true } = {}) => {
+                const jobs = chat.processMessage(Number(mesId), { force });
+                return Promise.all(jobs.map(j => queue.waitFor(j.id).then(
+                    r => ({ ok: true, path: r?.path, mesId: r?.mesId }),
+                    e => ({ ok: false, error: e?.message || String(e) }),
+                )));
             },
         });
     } catch { /* never block init */ }

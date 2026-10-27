@@ -10,7 +10,7 @@
  */
 
 export const MODULE = 'revamped_image_gen';
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 export const DISPLAY_NAME = 'Revamped Image Gen';
 
 // Settings key used by notsosillynotsoimages; read only for one-click import.

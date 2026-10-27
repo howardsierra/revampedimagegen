@@ -71,6 +71,7 @@ export const DEFAULTS = Object.freeze({
     // Inline generation
     earlyStart: true,               // start images as soon as a tag is complete, while the reply still streams
     autoIllustrate: 0,              // 0 = off; N = illustrate every Nth AI reply that has no image
+    processUserMessages: false,     // also generate image tags (and capture-rule matches) in the user's own messages
 
     // Regex prompt capture: turn other formats in AI replies into image tags.
     captureRules: defaultRules(),

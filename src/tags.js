@@ -80,6 +80,7 @@ const KEY_ALIASES = {
     duration: 'duration',
     audio: 'audio',
     ref_mode: 'ref_mode', refmode: 'ref_mode',
+    ref_names: 'ref_names', refnames: 'ref_names', no_refs: 'no_refs', norefs: 'no_refs',
 };
 
 function normalizeKeys(obj) {

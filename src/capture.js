@@ -44,6 +44,14 @@ export const BUILTIN_RULES = Object.freeze([
         flags: 'gim',
         example: 'Image prompt: detailed prompt --ar 16:9',
     },
+    {
+        // Clover OOC (github.com/aceeenvw/clover-ooc): an "Image generation:" order inside <ooc> tags.
+        id: 'clover',
+        name: 'Clover <ooc> Image generation: …',
+        pattern: String.raw`<ooc>\s*image[ \t]+generation[ \t]*:[ \t]*(?<prompt>[\s\S]{3,}?)\s*<\/ooc>`,
+        flags: 'gi',
+        example: '<ooc>Image generation: detailed prompt --ar 16:9</ooc>',
+    },
 ]);
 
 export function defaultRules() {
@@ -73,8 +81,14 @@ export function parseFlags(raw) {
     const prompt = String(raw).replace(FLAG_RE, (_, k, v) => {
         const key = k.toLowerCase();
         const val = v.trim();
-        if (key === 'ar' || key === 'aspect') data.aspect_ratio = val.replace(/\s/g, '');
-        else if (key === 'style') data.style = val;
+        if (key === 'ar' || key === 'aspect') {
+            // "--ar 9x16 and more words": only the ratio is the flag; the rest stays in the prompt.
+            const m = val.match(/^(\d+)\s*[:x×]\s*(\d+)\b\s*([\s\S]*)$/i);
+            if (!m) { data.aspect_ratio = val.replace(/\s/g, ''); return ''; }
+            data.aspect_ratio = `${m[1]}:${m[2]}`;
+            return m[3] ? ` ${m[3]}` : '';
+        }
+        if (key === 'style') data.style = val;
         else if (key === 'size' || key === 'res') data.image_size = val.toUpperCase();
         else if (key === 'no' || key === 'neg') data.negative_prompt = val;
         else if (key === 'seed' && /^\d+$/.test(val)) data.seed = Number(val);

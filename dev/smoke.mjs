@@ -424,6 +424,31 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
         await page.waitForFunction((i) => [...document.querySelectorAll(`#chat .mes[mesid="${i}"] img.iig-img`)].some(im => !/\[IMG/.test(im.getAttribute('src'))), autoId, { timeout: 12000 });
         check(true, 'auto-illustrate generated an image for a reply without one');
         await page.evaluate(() => { window.SillyTavern.getContext().extensionSettings.revamped_image_gen.autoIllustrate = 0; });
+
+        // User messages: left alone by default; other extensions can hand one over.
+        const userTag = 'Robin sends a selfie.\n\n<img data-iig-instruction=\'{"prompt":"Robin mirror selfie, candid phone photo","aspect_ratio":"9:16","style":false}\' src="[IMG:GEN]">';
+        const userId = await page.evaluate((t) => window.harness.addUserMessage(t), userTag);
+        await page.waitForTimeout(400);
+        check((await page.evaluate((i) => window.harness.chat[i].mes, userId)).includes('[IMG:GEN]'), 'tags in user messages are left alone by default');
+        const apiRes = await page.evaluate((i) => window.RevampedImageGen.processMessage(i), userId);
+        const userMes = await page.evaluate((i) => window.harness.chat[i].mes, userId);
+        check(apiRes.length === 1 && apiRes[0].ok && apiRes[0].path && !userMes.includes('[IMG:GEN]'), 'RevampedImageGen.processMessage generates a user message\'s tag');
+
+        // "Process image tags in my messages" + the Clover capture rule.
+        await page.evaluate(() => {
+            const st = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            st.processUserMessages = true;
+            st.captureRules.find(r => r.id === 'clover').enabled = true;
+        });
+        const cloverId = await page.evaluate(() => window.harness.addUserMessage('Let\'s see it.\n<ooc>\nImage generation: Elodie on the pier at dawn --ar 16:9\n</ooc>'));
+        await page.waitForFunction((i) => /data-iig-instruction/.test(window.harness.chat[i].mes) && !/\[IMG:GEN\]/.test(window.harness.chat[i].mes), cloverId, { timeout: 12000 });
+        const cloverMes = await page.evaluate((i) => window.harness.chat[i].mes, cloverId);
+        check(!/Image generation/.test(cloverMes) && /16:9/.test(cloverMes), 'Clover <ooc> order in a user message is captured and generated');
+        await page.evaluate(() => {
+            const st = window.SillyTavern.getContext().extensionSettings.revamped_image_gen;
+            st.processUserMessages = false;
+            st.captureRules.find(r => r.id === 'clover').enabled = false;
+        });
     }
 
     check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);

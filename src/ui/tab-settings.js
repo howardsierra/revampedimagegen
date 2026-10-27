@@ -427,6 +427,7 @@ export function createSettingsTab() {
         return section('Behaviour', [
             flag('autoGenerate', 'Generate automatically', 'Off: tags in AI replies show a "Tap to generate" button instead'),
             flag('earlyStart', 'Start images while the reply streams', 'Each image starts as soon as its tag is written, instead of after the whole reply'),
+            flag('processUserMessages', 'Process image tags in my messages', 'Image tags and capture-rule matches (e.g. a Clover <ooc> order) in your own messages are generated too'),
             field('Auto-illustrate', select('autoIllustrate', [
                 { value: '0', label: 'Off' },
                 { value: '1', label: 'Every reply without an image' },

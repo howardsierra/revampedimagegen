@@ -83,6 +83,12 @@ window.harness = {
         renderMessage(chat.length - 1);
         await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, chat.length - 1);
     },
+    async addUserMessage(text) {
+        chat.push({ name: 'Robin', is_user: true, mes: text });
+        renderMessage(chat.length - 1);
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, chat.length - 1);
+        return chat.length - 1;
+    },
     /** Stream a reply the way ST does: tokens first, then GENERATION_ENDED, then the render event. */
     async streamAiMessage(text, { steps = 8, tokenDelay = 120 } = {}) {
         await eventSource.emit(event_types.GENERATION_STARTED, 'normal', {}, false);

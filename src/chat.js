@@ -422,14 +422,18 @@ export function captureMessage(mesId) {
     return true;
 }
 
-/** Generate every pending tag in a message. Called after each AI message renders. */
+/**
+ * Generate every pending tag in a message. Called after each AI message renders,
+ * after the user's own messages when "Process image tags in my messages" is on,
+ * and by other extensions through window.RevampedImageGen.processMessage.
+ */
 export function processMessage(mesId, { force = false } = {}) {
     const s = settings();
     if (!s.enabled) return [];
     const msg = ctx().chat?.[mesId];
     if (!msg || msg.is_system) return [];
     settleStream(mesId);
-    if (!msg.is_user) captureMessage(mesId);
+    if (!msg.is_user || s.processUserMessages) captureMessage(mesId);
     const pending = parseTags(msg.mes).filter(t => t.state === 'pending');
     reattach(mesId);
     if (!pending.length || (!s.autoGenerate && !force)) {

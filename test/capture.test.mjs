@@ -61,3 +61,20 @@ test('parseFlags and instructions', () => {
     assert.match(formatInstructions('bracket'), /\[IMG: PROMPT --ar 16:9\]/);
     assert.match(formatInstructions('html'), /data-iig-instruction/);
 });
+
+test('Clover <ooc> image order → pending tag', () => {
+    const src = 'She waits.\n<ooc>\nImage generation: Ciara on a rooftop at dusk, wind in her hair --ar 9x16\n</ooc>\n<ooc>Make it rain more.</ooc>';
+    const { text, captured } = applyCapture(src, on('clover'));
+    assert.equal(captured.length, 1);
+    const [t] = parseTags(text);
+    assert.equal(t.data.prompt, 'Ciara on a rooftop at dusk, wind in her hair');
+    assert.equal(t.data.aspect_ratio, '9:16');
+    assert.ok(text.includes('<ooc>Make it rain more.</ooc>'), 'non-image OOC is left alone');
+    assert.ok(!text.includes('Image generation'));
+});
+
+test('--ar only takes the ratio; trailing words stay in the prompt', () => {
+    const d = parseFlags('Jun laughing --ar 3:4 under neon');
+    assert.equal(d.aspect_ratio, '3:4');
+    assert.equal(d.prompt.replace(/\s+/g, ' ').trim(), 'Jun laughing under neon');
+});

@@ -29,12 +29,14 @@ export function resolveOptions(kind, data, { fromStudio = false } = {}) {
     const norm = (v) => { const u = String(v || '').toUpperCase(); return u === 'AUTO' ? 'auto' : (IMAGE_SIZES.includes(u) || u === '512' ? u : ''); };
     const imageSize = sizeFor(s.model, pick(norm(data.image_size), norm(s.imageSize) || 'auto') || 'auto');
     const raw = String(data.prompt || '').trim();
+    // `style: false` / "none" skips the default style for this request.
+    const noStyle = data.style === false || /^\s*(none|off)\s*$/i.test(String(data.style ?? ''));
     const prompt = fromStudio ? raw : [s.promptPrefix, raw, s.promptSuffix].map(x => String(x || '').trim()).filter(Boolean).join(' ');
     return {
         kind,
         rawPrompt: raw,
         prompt,
-        style: pick(data.style, s.defaultStyle) || '',
+        style: noStyle ? '' : (pick(data.style, s.defaultStyle) || ''),
         aspectRatio: ar,
         imageSize,
         quality: pick(data.quality, s.quality),
@@ -45,8 +47,15 @@ export function resolveOptions(kind, data, { fromStudio = false } = {}) {
         resolution: VIDEO_RESOLUTIONS.includes(data.resolution) ? data.resolution : undefined,
         audio: typeof data.audio === 'boolean' ? data.audio : undefined,
         refMode: data.ref_mode,
-        noRefs: !!data.no_refs,
+        noRefs: !!data.no_refs && data.no_refs !== 'false',
+        refNames: parseRefNames(data.ref_names),
     };
+}
+
+/** `ref_names` as an array: accepts ["Ciara", "Mina"] or "Ciara, Mina". */
+export function parseRefNames(v) {
+    const list = Array.isArray(v) ? v : String(v ?? '').split(/[,;]/);
+    return list.map(n => String(n ?? '').trim()).filter(Boolean);
 }
 
 /** Throw a friendly, non-retriable error if the connection is obviously incomplete. */
@@ -78,7 +87,7 @@ export async function generate(kind, data, { signal, setStatus = () => {}, fromS
     const canRef = kind === 'video' || (provider.supportsRefs && s.sendRefs);
     if (canRef && !opts.noRefs) {
         setStatus('Loading references…');
-        const r = await collectRefs(opts.rawPrompt, kind === 'video' ? { max: 4 } : undefined);
+        const r = await collectRefs(opts.rawPrompt, { names: opts.refNames, ...(kind === 'video' ? { max: 4 } : {}) });
         refs = r.urls;
         refLabels = r.labels;
         refNames = r.matched.map(m => m.name);

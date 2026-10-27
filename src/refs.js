@@ -48,19 +48,27 @@ export function maxRefsFor(model = settings().model) {
 
 /**
  * Which reference slots apply to `promptText`, in priority order
- * (char → user → NPCs), capped at maxRefs. Pure apart from reading settings.
+ * (char → user → NPCs), capped at maxRefs. Slots named in `names` (a tag's
+ * `ref_names`) are always sent, ahead of the rest. Pure apart from reading settings.
  */
-export function matchRefs(promptText, { refs = activeRefs(), max = maxRefsFor() } = {}) {
+export function matchRefs(promptText, { refs = activeRefs(), max = maxRefsFor(), names = [] } = {}) {
     const out = [];
-    const consider = (slot, kind, label) => {
-        if (!slot?.path || out.length >= max) return;
-        const names = slotNames(slot, kind);
-        const hit = slot.always || nameInText(names, promptText);
-        if (hit) out.push({ kind, label, name: splitAliases(names)[0] || label, path: slot.path, reason: slot.always ? 'always' : 'name', layer: slot.layer || 'global' });
-    };
-    consider(refs.char, 'char', 'Character');
-    consider(refs.user, 'user', 'You');
-    for (const npc of refs.npcs || []) consider(npc, 'npc', 'NPC');
+    const wanted = (Array.isArray(names) ? names : [names]).map(n => String(n ?? '').trim()).filter(Boolean).join(' | ');
+    const slots = [[refs.char, 'char', 'Character'], [refs.user, 'user', 'You'], ...(refs.npcs || []).map(npc => [npc, 'npc', 'NPC'])]
+        .filter(([slot]) => slot?.path)
+        .map(([slot, kind, label]) => {
+            const slotName = slotNames(slot, kind);
+            const reason = wanted && nameInText(slotName, wanted) ? 'requested'
+                : slot.always ? 'always'
+                    : nameInText(slotName, promptText) ? 'name' : '';
+            return { slot, kind, label, slotName, reason };
+        });
+    for (const pass of [['requested'], ['always', 'name']]) {
+        for (const { slot, kind, label, slotName, reason } of slots) {
+            if (out.length >= max || !pass.includes(reason)) continue;
+            out.push({ kind, label, name: splitAliases(slotName)[0] || label, path: slot.path, reason, layer: slot.layer || 'global' });
+        }
+    }
     return out;
 }
 

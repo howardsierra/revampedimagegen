@@ -83,9 +83,11 @@ The AI doesn't have to write HTML. Under **Settings → Prompt capture**, enable
 | `<image>prompt</image>` | `<image>Robin under the lanterns --ar 3:4</image>` |
 | hidden comment | `<!-- image: a stormy harbour -->` (never visible to the reader) |
 | `Image prompt:` line | `**Image prompt:** Elodie laughing in the rain` |
+| Clover `<ooc>` | `<ooc>Image generation: Ciara on a rooftop at dusk --ar 9:16</ooc>` ([Clover OOC](https://github.com/aceeenvw/clover-ooc) image orders; other `<ooc>` notes are left alone) |
 | your own regex | Use the named group `(?<prompt>…)` or the first capture group. Optional groups `(?<style>)`, `(?<ar>)`, `(?<size>)`, `(?<neg>)` fill the other fields. |
 
-- Flags at the end of a prompt are understood: `--ar 16:9`, `--style …`, `--size 2K`, `--no …`, `--seed 42`.
+- Flags at the end of a prompt are understood: `--ar 16:9` (or `16x9`), `--style …` (`--style none` skips your default style), `--size 2K`, `--no …`, `--seed 42`.
+- Rules apply to AI replies. Turn on **Settings → Behaviour → Process image tags in my messages** to also run them (and generate any image tags) in your own messages, e.g. for Clover orders you type yourself.
 - Text inside existing image tags is never touched.
 - A tester shows live what each enabled rule captures from a sample reply.
 - **AI instructions → Tell the AI to write** switches the injected instructions to the format you chose. Simple formats are more reliable with smaller models and cost fewer tokens.
@@ -177,9 +179,11 @@ Same as notsosillynotsoimages:
 | Field | Notes |
 |---|---|
 | `prompt` | Required. Use characters' first names so their reference photos are matched. |
-| `style` | Optional. Falls back to your default style. |
+| `style` | Optional. Falls back to your default style; `false` or `"none"` skips it for this image. |
 | `aspect_ratio` | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9` |
 | `image_size` | `1K`, `2K`, `4K` |
+| `ref_names` | Optional. Characters whose reference photos must be sent, e.g. `["Ciara","Jun"]` or `"Ciara, Jun"`. They go first; name matching in the prompt still adds the rest. |
+| `no_refs` | Optional. `true` sends no reference photos. |
 | `quality`, `negative_prompt`, `seed`, `preset` | Optional, used where the provider supports them. |
 
 Video (experimental; set a video model first):
@@ -200,7 +204,13 @@ If you would rather put the instructions in your preset yourself, turn off **AI 
 | `/iig-illustrate [message id]` | Have the chat model write a prompt for a message (default: the last one) and generate it. |
 | `/iig-panel [tab]` | Open the panel, optionally on `create`, `queue`, `gallery`, `refs` or `settings`. |
 
-Other extensions can call `window.RevampedImageGen.generate(prompt, { aspect_ratio, style })`.
+Other extensions can use `window.RevampedImageGen`:
+
+| Call | What it does |
+|---|---|
+| `generate(prompt, { aspect_ratio, style, image_size, ref_names, no_refs, … })` | Generate one image; resolves to `{ path, … }`. `style: false` skips the default style. |
+| `processMessage(mesId, { force = true })` | Generate the pending image tags (and capture-rule matches) already in a chat message, user messages included, with the usual placeholders, Cancel, retries and chat-switch handling. Resolves to `[{ ok, path?, error? }]` once every job settles. `force: false` respects **Generate automatically**. |
+| `open(tab)`, `close()` | Open or close the panel. |
 
 ## Where things are stored
 

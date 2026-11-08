@@ -1027,6 +1027,53 @@ select.iig-input { appearance: auto; }
 .iig-ref-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .iig-ref-title { font-weight: 700; }
 
+/* A character's photos: a scrollable strip, with add at the end. */
+.iig-ref-photos {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    /* Room for the remove buttons that sit over each photo's corner. */
+    padding: 8px 8px 6px 2px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+}
+.iig-ref-photos .iig-ref-thumb { width: 72px; height: 90px; scroll-snap-align: start; }
+.iig-ref-photo { position: relative; flex: none; }
+.iig-ref-photo-x {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--iig-border);
+    border-radius: 50%;
+    background: var(--iig-surface-2);
+    color: var(--iig-fg);
+    font-size: 0.75em;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.iig-ref-photo-x:hover, .iig-ref-photo-x:focus-visible { background: var(--iig-danger, #c0392b); color: #fff; }
+.iig-ref-photo-main {
+    position: absolute;
+    left: 4px;
+    bottom: 4px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 0.7em;
+    pointer-events: none;
+}
+/* Touch: a bigger remove target. */
+@media (pointer: coarse) {
+    .iig-ref-photo-x { width: 30px; height: 30px; }
+}
+
 /* ================================================================ FAB */
 
 .iig-fab {

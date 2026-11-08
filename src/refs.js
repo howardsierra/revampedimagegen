@@ -4,7 +4,7 @@
  */
 
 import { modelCaps } from './models.js';
-import { activeRefs, settings } from './settings.js';
+import { activeRefs, settings, slotPaths } from './settings.js';
 import { getCharName, getUserName, log } from './st.js';
 import { loadAsDataUrl } from './storage.js';
 import { nameInText, splitAliases } from './tags.js';
@@ -55,21 +55,47 @@ export function matchRefs(promptText, { refs = activeRefs(), max = maxRefsFor(),
     const out = [];
     const wanted = (Array.isArray(names) ? names : [names]).map(n => String(n ?? '').trim()).filter(Boolean).join(' | ');
     const slots = [[refs.char, 'char', 'Character'], [refs.user, 'user', 'You'], ...(refs.npcs || []).map(npc => [npc, 'npc', 'NPC'])]
-        .filter(([slot]) => slot?.path)
-        .map(([slot, kind, label]) => {
+        .map(([slot, kind, label]) => [slot, kind, label, slotPaths(slot)])
+        .filter(([, , , paths]) => paths.length)
+        .map(([slot, kind, label, paths]) => {
             const slotName = slotNames(slot, kind);
             const reason = wanted && nameInText(slotName, wanted) ? 'requested'
                 : slot.always ? 'always'
                     : nameInText(slotName, promptText) ? 'name' : '';
-            return { slot, kind, label, slotName, reason };
+            return { slot, kind, label, slotName, reason, paths };
         });
+    // Characters with several photos: everyone's first photo goes before anyone's
+    // second, so a tight limit still shows every character.
     for (const pass of [['requested'], ['always', 'name']]) {
-        for (const { slot, kind, label, slotName, reason } of slots) {
-            if (out.length >= max || !pass.includes(reason)) continue;
-            out.push({ kind, label, name: splitAliases(slotName)[0] || label, path: slot.path, reason, layer: slot.layer || 'global' });
+        const inPass = slots.filter(x => pass.includes(x.reason));
+        const rounds = Math.max(0, ...inPass.map(x => x.paths.length));
+        for (let r = 0; r < rounds; r++) {
+            for (const { slot, kind, label, slotName, reason, paths } of inPass) {
+                if (out.length >= max || r >= paths.length) continue;
+                const name = splitAliases(slotName)[0] || label;
+                out.push({
+                    kind, label, name, path: paths[r], reason, layer: slot.layer || 'global',
+                    photo: r + 1, photos: paths.length,
+                });
+            }
         }
     }
+    // Keep each character's photos together, in their order.
+    const order = new Map();
+    for (const m of out) if (!order.has(m.name + m.kind)) order.set(m.name + m.kind, order.size);
+    out.sort((a, b) => order.get(a.name + a.kind) - order.get(b.name + b.kind) || a.photo - b.photo);
+    // Number the photos actually sent ("photo 2 of 2", not "of 5" when the limit cut some).
+    for (const m of out) {
+        const mine = out.filter(x => x.name === m.name && x.kind === m.kind);
+        m.photos = mine.length;
+        m.photo = mine.indexOf(m) + 1;
+    }
     return out;
+}
+
+/** "Elodie", or "Elodie (photo 2 of 3)" when several of her photos are sent. */
+export function refLabel(m) {
+    return m.photos > 1 ? `${m.name} (photo ${m.photo} of ${m.photos})` : m.name;
 }
 
 /** Load matched references as data URLs. Missing files are skipped with a warning. */
@@ -80,7 +106,7 @@ export async function collectRefs(promptText, opts) {
     for (const m of matched) {
         try {
             urls.push(await load(m.path));
-            labels.push(m.name);
+            labels.push(refLabel(m));
         } catch (e) {
             log('warn', `Reference for ${m.name} could not be loaded: ${e.message}`);
         }

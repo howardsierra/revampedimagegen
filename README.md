@@ -71,7 +71,13 @@ The main character and You come from the most specific layer that has a photo. E
 
 In the **Refs** tab, pick the layer you're editing. The **Inherited** list shows photos coming from the other layers; in a chat you can **mute** any of them for just that chat.
 
-To lock in a look you like, open any generated image and tap **Use as ref**. Choose the character, or create a new one, and the layer to save it in.
+To lock in a look you like, open any generated image and tap **Use as ref**. Choose the character, or create a new one, and the layer to save it in. The photo is added to that character's other photos; it doesn't replace them.
+
+**Several photos per character.** Each character holds as many photos as you like: different angles, outfits or expressions. **Add photos** lets you pick several at once, and each photo has its own × to remove it.
+- When a character is in the prompt, all of their photos are sent, up to **Max photos per image**. The first photo is the main one.
+- When that limit is tight, every character in the prompt gets their first photo before anyone gets a second.
+- Each photo is labelled for the model, e.g. "Elodie (photo 2 of 3)", so it knows they show the same person.
+- In a chat you can mute a single inherited photo while keeping the rest.
 
 ## Regex prompt capture
 

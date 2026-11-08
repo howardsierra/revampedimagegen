@@ -215,12 +215,24 @@ export function updateActiveProfile() {
 
 export const LAYERS = Object.freeze(['chat', 'character', 'global']);
 
+/** Every photo of a slot, first one first (slots once held a single `path`). */
+export function slotPaths(slot) {
+    if (!slot) return [];
+    return [...new Set([...(Array.isArray(slot.paths) ? slot.paths : []), slot.path].map(p => String(p || '')).filter(Boolean))];
+}
+
+/** Replace a slot's photos; `path` stays the first one for older readers. */
+export function setSlotPaths(slot, paths) {
+    slot.paths = [...new Set((paths || []).map(p => String(p || '')).filter(Boolean))];
+    slot.path = slot.paths[0] || '';
+    return slot;
+}
+
 function normalizeSlot(slot) {
     const out = { name: '', path: '', always: false, ...(slot || {}) };
     out.name = String(out.name || '');
-    out.path = String(out.path || '');
     out.always = !!out.always;
-    return out;
+    return setSlotPaths(out, slotPaths(out));
 }
 
 export function emptyRefSet() {
@@ -307,25 +319,27 @@ function mutedPaths() {
 export function activeRefs() {
     const muted = mutedPaths();
     const sets = LAYERS.map(l => [l, refLayer(l)]).filter(([, set]) => set);
+    const live = (slot) => slotPaths(slot).filter(p => !muted.has(p));
     const pick = (kind) => {
         for (const [layer, set] of sets) {
-            const slot = set[kind];
-            if (slot?.path && !muted.has(slot.path)) return { ...slot, layer };
+            const paths = live(set[kind]);
+            if (paths.length) return { ...setSlotPaths({ ...set[kind] }, paths), layer };
         }
         // No photo anywhere: still return the most specific name so matching hints work.
         const named = sets.find(([, set]) => set[kind]?.name);
-        return named ? { ...named[1][kind], path: '', layer: named[0] } : { ...normalizeSlot(), layer: 'global' };
+        return named ? { ...setSlotPaths({ ...named[1][kind] }, []), layer: named[0] } : { ...normalizeSlot(), layer: 'global' };
     };
     const npcs = [];
     const seen = new Set();
     for (const [layer, set] of sets) {
         for (const n of set.npcs || []) {
-            if (!n.path || muted.has(n.path)) continue;
-            const key = n.name.split(',')[0].trim().toLowerCase() || n.path;
-            if (seen.has(key) || seen.has(n.path)) continue;
+            const paths = live(n);
+            if (!paths.length) continue;
+            const key = n.name.split(',')[0].trim().toLowerCase() || paths[0];
+            if (seen.has(key) || seen.has(paths[0])) continue;
             seen.add(key);
-            seen.add(n.path);
-            npcs.push({ ...n, layer });
+            seen.add(paths[0]);
+            npcs.push({ ...setSlotPaths({ ...n }, paths), layer });
         }
     }
     return { char: pick('char'), user: pick('user'), npcs };
@@ -339,7 +353,8 @@ export function inheritedRefs(editing) {
         const set = refLayer(layer);
         if (!set) continue;
         for (const [kind, slot] of [['char', set.char], ['user', set.user], ...set.npcs.map(n => ['npc', n])]) {
-            if (slot?.path) out.push({ ...slot, kind, layer });
+            // One row per photo, so a chat can mute a single photo.
+            for (const path of slotPaths(slot)) out.push({ ...slot, path, kind, layer });
         }
     }
     return out;
@@ -384,7 +399,7 @@ export function knownRefPaths() {
     if (meta) sets.push(meta);
     const out = new Set();
     for (const set of sets) {
-        for (const slot of [set?.char, set?.user, ...(set?.npcs || [])]) if (slot?.path) out.add(slot.path);
+        for (const slot of [set?.char, set?.user, ...(set?.npcs || [])]) for (const p of slotPaths(slot)) out.add(p);
     }
     return out;
 }

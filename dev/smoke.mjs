@@ -449,6 +449,39 @@ for (const d of devices.filter(x => !process.env.ONLY || process.env.ONLY.split(
             st.processUserMessages = false;
             st.captureRules.find(r => r.id === 'clover').enabled = false;
         });
+
+        // Several photos per character: "Use as ref" adds (not replaces); all of them are sent and labelled.
+        await page.evaluate(() => window.RevampedImageGen.close());
+        await page.waitForTimeout(300);
+        await page.evaluate(() => { const s = window.SillyTavern.getContext().extensionSettings.revamped_image_gen; Object.assign(s, { provider: 'openai', endpoint: `${location.origin}/mock`, model: 'mock-image-1', apiKey: 'test-key', autoIllustrate: 0 }); });
+        await page.evaluate((i) => document.querySelector(`#chat .mes[mesid="${i}"] img.iig-img`).scrollIntoView({ block: 'center' }), autoId);
+        await page.locator(`#chat .mes[mesid="${autoId}"] img.iig-img`).first().click();
+        await page.waitForSelector('.iig-viewer.is-open');
+        await page.locator('.iig-viewer-act', { hasText: 'Use as ref' }).click();
+        await page.waitForSelector('.iig-modal.is-open');
+        await page.locator('.iig-modal .iig-chip', { hasText: 'This character' }).click();
+        await page.locator('.iig-modal .iig-btn.primary').click();
+        await page.waitForFunction(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.charRefSets?.['elodie.png']?.char?.paths?.length === 2, null, { timeout: 10000 }).catch(() => null);
+        const charPaths = await page.evaluate(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.charRefSets?.['elodie.png']?.char?.paths || []);
+        check(charPaths.length === 2 && new Set(charPaths).size === 2, `use-as-ref adds a second photo for the same character (${charPaths.length})`);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+        // Mutes are per chat; clear any from earlier checks so both photos apply.
+        await page.evaluate(() => { const m = window.SillyTavern.getContext().chatMetadata; if (m.iig_refs) m.iig_refs.muted = []; });
+        await page.evaluate(() => window.RevampedImageGen.generate('Elodie waving from the pier', { aspect_ratio: '1:1' }));
+        const multi = await page.evaluate(async () => (await fetch('/mock/_last')).json());
+        check(multi.image === 2 && /Elodie \(photo 1 of 2\).*Elodie \(photo 2 of 2\)/.test(multi.prompt || ''), `both photos sent and labelled (${multi.image} images: ${String(multi.prompt).slice(0, 160)})`);
+        await page.evaluate(() => window.RevampedImageGen.open('refs'));
+        await page.locator('#iig-tab-refs .iig-chip', { hasText: 'This character' }).first().click();
+        await page.waitForTimeout(300);
+        const strip = page.locator('#iig-tab-refs .iig-ref-card').first().locator('.iig-ref-photo');
+        check((await strip.count()) === 2, 'the References tab shows both photos in the character\'s strip');
+        await page.locator('#iig-tab-refs .iig-ref-card').first().scrollIntoViewIfNeeded();
+        await shot('13-refs-multiple-photos');
+        await strip.nth(1).locator('.iig-ref-photo-x').click();
+        await page.waitForTimeout(300);
+        const after = await page.evaluate(() => window.SillyTavern.getContext().extensionSettings.revamped_image_gen.charRefSets?.['elodie.png']?.char?.paths || []);
+        check(after.length === 1 && after[0] === charPaths[0], 'removing one photo keeps the others');
     }
 
     check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
